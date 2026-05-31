@@ -1,0 +1,6 @@
+moxgo
+*.onnx
+*.onnx.data
+models/
+testdata/
+build/

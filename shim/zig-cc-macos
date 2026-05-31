@@ -1,0 +1,12 @@
+#!/bin/sh
+prev=
+for arg in "$@"; do
+    if [ "$prev" = "--print-prog-name" ]; then
+        case "$arg" in
+            strip)    command -v llvm-strip; exit 0 ;;
+            dsymutil) command -v dsymutil;   exit 0 ;;
+        esac
+    fi
+    prev=$arg
+done
+exec zig cc "$@"

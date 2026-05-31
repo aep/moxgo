@@ -1,0 +1,155 @@
+syntax = "proto3";
+package gomax.v1;
+option go_package = "github.com/aep/moxgo/pkg/proto/gomax/v1;gomaxv1";
+
+service InferenceService {
+  rpc Info(InfoRequest) returns (InfoResponse);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Ps(PsRequest) returns (PsResponse);
+  rpc Pull(PullRequest) returns (stream PullEvent);
+  rpc Run(RunRequest) returns (RunResponse);
+  rpc Rm(RmRequest) returns (RmResponse);
+  rpc Predict(PredictRequest) returns (PredictResponse);
+  rpc PredictStream(PredictStreamRequest) returns (stream PredictStreamResponse);
+}
+
+message InfoRequest {}
+message InfoResponse {
+  string version = 1;
+}
+
+message ListProvidersRequest {}
+message ListProvidersResponse {
+  repeated string providers = 1;
+}
+
+message ListRequest {}
+message ListResponse {
+  repeated ModelInfo models = 1;
+}
+
+message ModelInfo {
+  string name = 1;
+  string path = 2;
+  string labels = 3;
+  repeated ModelInput inputs = 4;
+}
+
+message ModelInput {
+  string name = 1;
+  string type = 2;
+  map<string, string> params = 3;
+}
+
+message PsRequest {}
+message PsResponse {
+  repeated RunningModel models = 1;
+}
+
+message RunningModel {
+  string name = 1;
+  string ep = 2;
+  int32 threads = 3;
+}
+
+message PullRequest {
+  string model = 1;
+}
+
+message PullEvent {
+  string file = 1;
+  int64 total = 2;
+  int64 downloaded = 3;
+  bool done = 4;
+}
+
+message RunRequest {
+  string model = 1;
+  string ep = 2;
+}
+
+message RunResponse {
+  string model = 1;
+  string ep = 2;
+}
+
+message RmRequest {
+  string model = 1;
+}
+
+message RmResponse {}
+
+message PredictRequest {
+  string model = 1;
+  repeated Input inputs = 2;
+}
+
+message Input {
+  string name = 1;
+  oneof data {
+    bytes file_bytes = 2;
+    RawTensor tensor = 3;
+  }
+}
+
+message RawTensor {
+  bytes data = 1;
+  repeated int64 shape = 2;
+}
+
+message PredictResponse {
+  double inference_time_ms = 1;
+  repeated OutputResult outputs = 2;
+}
+
+message OutputResult {
+  string name = 1;
+  repeated int64 shape = 2;
+  oneof result {
+    Classifications classifications = 10;
+    Detections detections = 11;
+    Embedding embedding = 12;
+    RawTensor raw = 13;
+  }
+}
+
+message Classifications {
+  repeated Classification items = 1;
+}
+
+message Classification {
+  string label = 1;
+  int32 class_id = 2;
+  float score = 3;
+}
+
+message Detections {
+  repeated Detection items = 1;
+}
+
+message Detection {
+  string label = 1;
+  int32 class_id = 2;
+  float confidence = 3;
+  float x1 = 4;
+  float y1 = 5;
+  float x2 = 6;
+  float y2 = 7;
+}
+
+message Embedding {
+  repeated float values = 1;
+  repeated int64 shape = 2;
+}
+
+message PredictStreamRequest {
+  string model = 1;
+  repeated Input inputs = 2;
+}
+
+message PredictStreamResponse {
+  double window_start_sec = 1;
+  double window_end_sec = 2;
+  repeated OutputResult outputs = 3;
+}
