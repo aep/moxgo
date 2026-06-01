@@ -10,7 +10,6 @@ import (
 
 	"github.com/aep/moxgo/pkg/audio"
 	goimage "github.com/aep/moxgo/pkg/image"
-	"github.com/aep/moxgo/pkg/labels"
 	"github.com/aep/moxgo/pkg/onnx"
 	gomaxv1 "github.com/aep/moxgo/pkg/proto/gomax/v1"
 )
@@ -406,7 +405,7 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 		Shape: result.Shape,
 	}
 
-	if result.Dtype != onnx.ElemTypeFloat32 || result.Len == 0 {
+	if oc == nil || result.Dtype != onnx.ElemTypeFloat32 || result.Len == 0 {
 		or.Result = &gomaxv1.OutputResult_Raw{Raw: RawOutput(
 			unsafe.Slice((*float32)(result.Ptr), result.Len), result.Shape,
 		)}
@@ -414,23 +413,19 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 	}
 
 	data := unsafe.Slice((*float32)(result.Ptr), result.Len)
-	var lbls labels.Labels
-	if oc != nil {
-		lbls = oc.ResolvedLabels
-	}
 
-	switch {
-	case IsYOLODetectionShape(result.Shape) && imgTensor != nil && lbls != nil:
+	switch oc.Type {
+	case "detection":
 		or.Result = &gomaxv1.OutputResult_Detections{
-			Detections: DetectOutput(data, result.Shape, lbls, imgTensor),
+			Detections: DetectOutput(data, result.Shape, oc.ResolvedLabels, imgTensor),
 		}
-	case IsClassificationShape(result.Shape) && lbls != nil:
-		var sigmoid float64
-		if oc != nil {
-			sigmoid = oc.Sigmoid
-		}
+	case "classification":
 		or.Result = &gomaxv1.OutputResult_Classifications{
-			Classifications: ClassifyOutput(data, lbls, 10, sigmoid),
+			Classifications: ClassifyOutput(data, oc.ResolvedLabels, 10, oc.Sigmoid),
+		}
+	case "embedding":
+		or.Result = &gomaxv1.OutputResult_Embedding{
+			Embedding: EmbeddingOutput(data, result.Shape),
 		}
 	default:
 		or.Result = &gomaxv1.OutputResult_Raw{Raw: RawOutput(data, result.Shape)}

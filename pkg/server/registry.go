@@ -61,6 +61,7 @@ func (ic *InputConfig) ParamsMap() map[string]string {
 // OutputConfig describes a model output.
 type OutputConfig struct {
 	Name           string        `yaml:"-" json:"-"`
+	Type           string        `yaml:"type" json:"type"`
 	Labels         string        `yaml:"labels" json:"labels,omitempty"`
 	Sigmoid        float64       `yaml:"sigmoid" json:"sigmoid,omitempty"`
 	ResolvedLabels labels.Labels `yaml:"-" json:"-"`
@@ -216,6 +217,13 @@ func validateModel(cfg *ModelConfig) error {
 		case "raw":
 		default:
 			return fmt.Errorf("input %q: unknown type %q (want image, audio, or raw)", name, inp.Type)
+		}
+	}
+	for name, out := range cfg.Outputs {
+		switch out.Type {
+		case "classification", "detection", "embedding", "raw":
+		default:
+			return fmt.Errorf("output %q: unknown type %q (want classification, detection, embedding, or raw)", name, out.Type)
 		}
 	}
 	return nil

@@ -8,6 +8,7 @@ models:
         height: 640
     outputs:
       output0:
+        type: detection
         labels: coco80
 
   birdnet:
@@ -20,5 +21,6 @@ models:
         overlap: 0.0
     outputs:
       predictions:
+        type: classification
         labels: models/birdnet-v3-labels.csv
         sigmoid: 1.0

@@ -160,41 +160,6 @@ func RawOutput(data []float32, shape []int64) *gomaxv1.RawTensor {
 	return &gomaxv1.RawTensor{Data: buf, Shape: s}
 }
 
-// IsClassificationShape returns true for [1,N], [-1,N], or [N].
-func IsClassificationShape(shape []int64) bool {
-	switch len(shape) {
-	case 1:
-		return shape[0] > 1 || shape[0] == -1
-	case 2:
-		return (shape[0] == 1 || shape[0] == -1) && (shape[1] > 1 || shape[1] == -1)
-	default:
-		return false
-	}
-}
-
-// IsYOLODetectionShape returns true for [1, 4+C, N].
-func IsYOLODetectionShape(shape []int64) bool {
-	if len(shape) != 3 {
-		return false
-	}
-	return shape[0] >= 1 && shape[1] > 4 && shape[2] > shape[1]
-}
-
-// ClassCountFromShape extracts class count from a classification shape.
-func ClassCountFromShape(shape []int64) int {
-	switch len(shape) {
-	case 1:
-		if shape[0] > 0 {
-			return int(shape[0])
-		}
-	case 2:
-		if shape[1] > 0 {
-			return int(shape[1])
-		}
-	}
-	return 0
-}
-
 func bboxIoU(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2 float32) float32 {
 	ix1 := max32(ax1, bx1)
 	iy1 := max32(ay1, by1)
