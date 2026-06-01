@@ -20,6 +20,8 @@ jobs:
 
       - run: nix develop --command make cross VERSION=${{ github.ref_name }}
 
+      - run: cp install/install.sh install/install.ps1 build/bin/
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
