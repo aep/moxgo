@@ -14,6 +14,19 @@ import (
 
 var registryURL string
 
+func formatSize(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1fG", float64(b)/float64(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.0fM", float64(b)/float64(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.0fK", float64(b)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(pullCmd)
 
@@ -76,9 +89,9 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%-30s %-20s %s\n", "NAME", "LICENSE", "DESCRIPTION")
+		fmt.Printf("%-30s %-10s %-20s %s\n", "NAME", "SIZE", "LICENSE", "DESCRIPTION")
 		for _, m := range idx.Models {
-			fmt.Printf("%-30s %-20s %s\n", m.Name, m.License, m.Description)
+			fmt.Printf("%-30s %-10s %-20s %s\n", m.Name, formatSize(m.Size), m.License, m.Description)
 		}
 		return nil
 	},

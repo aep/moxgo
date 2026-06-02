@@ -22,6 +22,7 @@ type IndexEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	License     string `json:"license"`
+	Size        int64  `json:"size"`
 }
 
 type Index struct {
