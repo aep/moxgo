@@ -52,7 +52,7 @@ func ClassifyOutput(data []float32, lbls labels.Labels, topK int, sigmoid float6
 	return &gomaxv1.Classifications{Items: items}
 }
 
-// DetectOutput decodes YOLO [1, 4+C, N] output with NMS and coordinate mapping.
+// DetectOutput decodes YOLO-style [1, 4+C, N] output with NMS and coordinate mapping.
 func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
 	nClasses := int(shape[1]) - 4
 	nDets := int(shape[2])
@@ -126,6 +126,126 @@ func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *
 		oy1 := (d.y1 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
 		ox2 := (d.x2 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
 		oy2 := (d.y2 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+		items = append(items, &gomaxv1.Detection{
+			Label:      label,
+			ClassId:    int32(d.classIdx),
+			Confidence: d.conf,
+			X1:         ox1, Y1: oy1, X2: ox2, Y2: oy2,
+		})
+	}
+	return &gomaxv1.Detections{Items: items}
+}
+
+// NormalizeCHW applies per-channel (x - mean) / std in-place on CHW [0,1] data.
+func NormalizeCHW(data []float32, width, height int, mean, std []float32) {
+	chSize := width * height
+	for c := 0; c < 3 && c < len(mean) && c < len(std); c++ {
+		off := c * chSize
+		m, s := mean[c], std[c]
+		for i := 0; i < chSize; i++ {
+			data[off+i] = (data[off+i] - m) / s
+		}
+	}
+}
+
+// DetrDetectOutput decodes DETR-style [1, Q, C] logits + [1, Q, 4] normalized [cx,cy,w,h] boxes.
+func DetrDetectOutput(logits []float32, logitsShape []int64, boxes []float32, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
+	numQueries := int(logitsShape[1])
+	numClasses := int(logitsShape[2])
+	const confThreshold = 0.35
+	const iouThreshold = 0.7
+
+	type det struct {
+		x1, y1, x2, y2 float32
+		classIdx        int
+		conf            float32
+	}
+
+	var imgW, imgH float32
+	if imgTensor != nil {
+		imgW = float32(imgTensor.Shape[3])
+		imgH = float32(imgTensor.Shape[2])
+	} else {
+		imgW, imgH = 1, 1
+	}
+
+	var dets []det
+	for q := 0; q < numQueries; q++ {
+		base := q * numClasses
+		bestClass := -1
+		var bestLogit float32
+		// Start from class 1 to skip the background/no-object class at index 0.
+		for c := 1; c < numClasses; c++ {
+			if bestClass < 0 || logits[base+c] > bestLogit {
+				bestLogit = logits[base+c]
+				bestClass = c
+			}
+		}
+		if bestClass < 0 {
+			continue
+		}
+		conf := sigmoid32(bestLogit)
+		if conf < confThreshold {
+			continue
+		}
+
+		bbase := q * 4
+		cx := boxes[bbase+0]
+		cy := boxes[bbase+1]
+		w := boxes[bbase+2]
+		h := boxes[bbase+3]
+
+		x1 := (cx - w/2) * imgW
+		y1 := (cy - h/2) * imgH
+		x2 := (cx + w/2) * imgW
+		y2 := (cy + h/2) * imgH
+
+		dets = append(dets, det{x1, y1, x2, y2, bestClass, conf})
+	}
+
+	// Sort descending by confidence.
+	for i := 1; i < len(dets); i++ {
+		for j := i; j > 0 && dets[j].conf > dets[j-1].conf; j-- {
+			dets[j], dets[j-1] = dets[j-1], dets[j]
+		}
+	}
+
+	// NMS per class.
+	keep := make([]bool, len(dets))
+	for i := range keep {
+		keep[i] = true
+	}
+	for i := 0; i < len(dets); i++ {
+		if !keep[i] {
+			continue
+		}
+		for j := i + 1; j < len(dets); j++ {
+			if !keep[j] || dets[j].classIdx != dets[i].classIdx {
+				continue
+			}
+			if bboxIoU(dets[i].x1, dets[i].y1, dets[i].x2, dets[i].y2,
+				dets[j].x1, dets[j].y1, dets[j].x2, dets[j].y2) > iouThreshold {
+				keep[j] = false
+			}
+		}
+	}
+
+	items := make([]*gomaxv1.Detection, 0)
+	for i, d := range dets {
+		if !keep[i] {
+			continue
+		}
+		label := ""
+		if lbls != nil {
+			label = lbls.Get(d.classIdx)
+		}
+		ox1, oy1, ox2, oy2 := d.x1, d.y1, d.x2, d.y2
+		if imgTensor != nil {
+			ox1 = (d.x1 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
+			oy1 = (d.y1 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+			ox2 = (d.x2 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
+			oy2 = (d.y2 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+		}
 		items = append(items, &gomaxv1.Detection{
 			Label:      label,
 			ClassId:    int32(d.classIdx),

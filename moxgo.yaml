@@ -11,6 +11,21 @@ models:
         type: detection
         labels: coco80
 
+  rf-detr-large:
+    path: models/rf-detr-large.onnx
+    inputs:
+      pixel_values:
+        type: image
+        width: 704
+        height: 704
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
+    outputs:
+      logits:
+        type: detection
+        boxes: pred_boxes
+        labels: coco91
+
   birdnet:
     path: models/birdnet-v3-fp32.onnx
     inputs:

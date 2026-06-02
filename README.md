@@ -44,22 +44,3 @@ the manifest describes inputs, outputs, and runtime options:
   }
 }
 ```
-
-input types:
-
-- `image` — requires `width` and `height`
-- `audio` — requires `sample_rate` and `chunk` (seconds), optional `overlap` (seconds)
-- `raw` — no additional fields
-
-output options:
-
-- `labels` — built-in (`coco80`, `coco91`) or path to a CSV file relative to the model directory
-- `sigmoid` — threshold for sigmoid activation on output scores
-
-runtime options (top-level in manifest):
-
-- `ep` — execution provider (e.g. `CUDA`, `CoreML`), defaults to auto-detection
-- `threads` — number of inference threads
-
-the server picks up models from `~/.moxgo/models/` on startup. after adding a model, restart the server or use `moxgo run my-model` to load it.
-

@@ -250,6 +250,9 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 				return nil, fmt.Errorf("decode image %q: %w", inp.Name, err)
 			}
 			copy(slot.bufs[i], tensor.Data)
+			if len(inp.Mean) > 0 && len(inp.Std) > 0 {
+				NormalizeCHW(slot.bufs[i], inp.Width, inp.Height, inp.Mean, inp.Std)
+			}
 			imgTensors = append(imgTensors, tensor)
 
 		case "audio":
@@ -295,11 +298,15 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 		InferenceTimeMs: float64(elapsed.Microseconds()) / 1000.0,
 	}
 	for i, out := range inst.Session.Outputs {
+		oc := inst.Config.Outputs[out.Name]
+		if oc == nil {
+			continue
+		}
 		result, err := slot.run.GetOutput(i)
 		if err != nil {
 			continue
 		}
-		resp.Outputs = append(resp.Outputs, buildOutputResult(out.Name, inst.Config.Outputs[out.Name], result, firstImg))
+		resp.Outputs = append(resp.Outputs, buildOutputResult(out.Name, oc, result, firstImg, slot))
 	}
 	return resp, nil
 }
@@ -371,11 +378,15 @@ func (inst *Instance) PredictChunked(inputs []*gomaxv1.Input, fn func(*gomaxv1.P
 			WindowEndSec:   tEnd,
 		}
 		for i, out := range inst.Session.Outputs {
+			oc := inst.Config.Outputs[out.Name]
+			if oc == nil {
+				continue
+			}
 			result, err := slot.run.GetOutput(i)
 			if err != nil {
 				continue
 			}
-			resp.Outputs = append(resp.Outputs, buildOutputResult(out.Name, inst.Config.Outputs[out.Name], result, nil))
+			resp.Outputs = append(resp.Outputs, buildOutputResult(out.Name, oc, result, nil, slot))
 		}
 		if err := fn(resp); err != nil {
 			return err
@@ -399,7 +410,7 @@ func (inst *Instance) close() {
 	inst.Session.Close()
 }
 
-func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTensor *goimage.Tensor) *gomaxv1.OutputResult {
+func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTensor *goimage.Tensor, slot *runSlot) *gomaxv1.OutputResult {
 	or := &gomaxv1.OutputResult{
 		Name:  name,
 		Shape: result.Shape,
@@ -416,6 +427,17 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 
 	switch oc.Type {
 	case "detection":
+		if oc.Boxes != "" {
+			boxes, err := slot.run.GetOutputByName(oc.Boxes)
+			if err == nil && boxes.Dtype == onnx.ElemTypeFloat32 && boxes.Len > 0 {
+				or.Result = &gomaxv1.OutputResult_Detections{
+					Detections: DetrDetectOutput(data, result.Shape,
+						unsafe.Slice((*float32)(boxes.Ptr), boxes.Len),
+						oc.ResolvedLabels, imgTensor),
+				}
+				break
+			}
+		}
 		or.Result = &gomaxv1.OutputResult_Detections{
 			Detections: DetectOutput(data, result.Shape, oc.ResolvedLabels, imgTensor),
 		}

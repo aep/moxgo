@@ -11,11 +11,13 @@ import (
 
 // InputConfig describes preprocessing for a model input.
 type InputConfig struct {
-	Name       string  `yaml:"-" json:"-"`
-	Type       string  `yaml:"type" json:"type"`
-	Width      int     `yaml:"width" json:"width,omitempty"`
-	Height     int     `yaml:"height" json:"height,omitempty"`
-	SampleRate int     `yaml:"sample_rate" json:"sample_rate,omitempty"`
+	Name       string    `yaml:"-" json:"-"`
+	Type       string    `yaml:"type" json:"type"`
+	Width      int       `yaml:"width" json:"width,omitempty"`
+	Height     int       `yaml:"height" json:"height,omitempty"`
+	Mean       []float32 `yaml:"mean" json:"mean,omitempty"`
+	Std        []float32 `yaml:"std" json:"std,omitempty"`
+	SampleRate int       `yaml:"sample_rate" json:"sample_rate,omitempty"`
 	Chunk      float64 `yaml:"chunk" json:"chunk,omitempty"`
 	Overlap    float64 `yaml:"overlap" json:"overlap,omitempty"`
 }
@@ -64,6 +66,7 @@ type OutputConfig struct {
 	Type           string        `yaml:"type" json:"type"`
 	Labels         string        `yaml:"labels" json:"labels,omitempty"`
 	Sigmoid        float64       `yaml:"sigmoid" json:"sigmoid,omitempty"`
+	Boxes          string        `yaml:"boxes" json:"boxes,omitempty"`
 	ResolvedLabels labels.Labels `yaml:"-" json:"-"`
 }
 
