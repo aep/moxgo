@@ -16,12 +16,17 @@ func StoreDir() (string, error) {
 	return filepath.Join(home, ".moxgo", "models"), nil
 }
 
+// ModelDir is where model variant name ("model" or "model:tag") is kept.
 func ModelDir(name string) (string, error) {
+	model, tag, err := SplitName(name)
+	if err != nil {
+		return "", err
+	}
 	store, err := StoreDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(store, name), nil
+	return filepath.Join(store, dirName(model, tag)), nil
 }
 
 func ListLocal() ([]*server.ModelConfig, error) {
@@ -43,7 +48,7 @@ func ListLocal() ([]*server.ModelConfig, error) {
 		if !e.IsDir() {
 			continue
 		}
-		cfg, err := loadLocalModel(e.Name(), filepath.Join(store, e.Name(), "manifest.json"))
+		cfg, err := loadLocalModel(nameOfDir(e.Name()), filepath.Join(store, e.Name(), "manifest.json"))
 		if err != nil {
 			continue
 		}
@@ -82,6 +87,7 @@ func loadLocalModel(name, manifestPath string) (*server.ModelConfig, error) {
 		Name:    name,
 		Path:    filepath.Join(dir, "model.onnx"),
 		EP:      m.EP,
+		Needs:   m.Needs,
 		Threads: m.Threads,
 		Inputs:  m.Inputs,
 		Outputs: m.Outputs,

@@ -1,0 +1,314 @@
+{
+  "packages": {
+    "onnxruntime-android-arm64-1.29.0": {
+      "description": "ONNX Runtime 1.29.0 for Android arm64: CPU, XNNPACK, NNAPI (Microsoft)",
+      "license": "MIT",
+      "source": {
+        "url": "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.29.0/onnxruntime-android-1.29.0.aar",
+        "sha256": "e97540ca78fe36f6fe2013f82843414fb843b6c7681fb04644cba5e1406662dd",
+        "size": 51897836
+      },
+      "files": [
+        {
+          "name": "libonnxruntime.so",
+          "path": "jni/arm64-v8a/libonnxruntime.so",
+          "sha256": "3a602b463d434d20fbf69cd1b8bdfd2f86a2cb67d08de97aec8f62476fa4ab87",
+          "size": 32120992
+        }
+      ]
+    },
+    "onnxruntime-linux-x64-1.29.0": {
+      "description": "ONNX Runtime 1.29.0 for Linux x86_64: CPU (Microsoft)",
+      "license": "MIT",
+      "source": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz",
+        "sha256": "c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba",
+        "size": 11082880
+      },
+      "files": [
+        {
+          "name": "libonnxruntime.so",
+          "path": "onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so.1.29.0",
+          "sha256": "5715f06d8992ca8eeeddcce43df3a7d38f97d537052126f558e912cb312460ca",
+          "size": 28497752
+        }
+      ]
+    },
+    "onnxruntime-linux-arm64-1.29.0": {
+      "description": "ONNX Runtime 1.29.0 for Linux aarch64: CPU (Microsoft)",
+      "license": "MIT",
+      "source": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-aarch64-1.29.0.tgz",
+        "sha256": "e1799098ebc054b370f6176a450f158720f297818c613e5dc99b92e2ec82346f",
+        "size": 10027600
+      },
+      "files": [
+        {
+          "name": "libonnxruntime.so",
+          "path": "onnxruntime-linux-aarch64-1.29.0/lib/libonnxruntime.so.1.29.0",
+          "sha256": "a27d21126db312aa8f02f3d5eaebe466e991f51f469882e6d0407d5a8b64afda",
+          "size": 24538024
+        }
+      ]
+    },
+    "onnxruntime-macos-arm64-1.29.0": {
+      "description": "ONNX Runtime 1.29.0 for macOS arm64: CPU, CoreML (Microsoft)",
+      "license": "MIT",
+      "source": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-osx-arm64-1.29.0.tgz",
+        "sha256": "d0706fc34f315d8c88639d0a8c81f2e09e815f282cabed3493c06a054352cf92",
+        "size": 41578864
+      },
+      "files": [
+        {
+          "name": "libonnxruntime.dylib",
+          "path": "onnxruntime-osx-arm64-1.29.0/lib/libonnxruntime.1.29.0.dylib",
+          "sha256": "68f6e54e695583adc371aef610ec4abb1ffaa3df656582922de7690f7e2000eb",
+          "size": 43184400
+        }
+      ]
+    },
+    "onnxruntime-windows-x64-1.29.0": {
+      "description": "ONNX Runtime 1.29.0 for Windows x64: CPU (Microsoft)",
+      "license": "MIT",
+      "source": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
+        "sha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
+        "size": 79645520
+      },
+      "files": [
+        {
+          "name": "onnxruntime.dll",
+          "path": "onnxruntime-win-x64-1.29.0/lib/onnxruntime.dll",
+          "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
+          "size": 16149344
+        },
+        {
+          "name": "onnxruntime_providers_shared.dll",
+          "path": "onnxruntime-win-x64-1.29.0/lib/onnxruntime_providers_shared.dll",
+          "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8",
+          "size": 21856
+        }
+      ]
+    },
+    "onnxruntime-qnn-android-2.7.0": {
+      "description": "Qualcomm's QNN plugin execution provider 2.7.0 for Android (built for ORT 1.29.0, QAIRT 2.51.0)",
+      "license": "MIT",
+      "source": {
+        "url": "https://repo1.maven.org/maven2/com/qualcomm/qti/onnxruntime-android-qnn/2.7.0/onnxruntime-android-qnn-2.7.0.aar",
+        "sha256": "ecd36df222e2a947ceb13bdd6fec181d1f1841b40379e21ce519830f2fbd562a",
+        "size": 1663668
+      },
+      "files": [
+        {
+          "name": "libonnxruntime_providers_qnn.so",
+          "path": "jni/arm64-v8a/libonnxruntime_providers_qnn.so",
+          "sha256": "7616d66073d4d64fead7ed6f7b2384fe9e0e9f708fbce9a67dee215b122a2527",
+          "size": 4448624
+        }
+      ]
+    },
+    "qnn-htp-android-2.51.0": {
+      "description": "Qualcomm AI Runtime 2.51.0 HTP (NPU) backend for Android, all Hexagon generations",
+      "license": "Qualcomm AI Runtime license (proprietary), see com.qualcomm.qti:qnn-runtime",
+      "download": true,
+      "source": {
+        "url": "https://repo1.maven.org/maven2/com/qualcomm/qti/qnn-runtime/2.51.0/qnn-runtime-2.51.0.aar",
+        "sha256": "6388face1d5aa5e8958d745e5a547e92b5bec6fc332dfb1b438b1e17ffa02861",
+        "size": 75297348
+      },
+      "files": [
+        {
+          "name": "libQnnSystem.so",
+          "path": "jni/arm64-v8a/libQnnSystem.so",
+          "sha256": "460e782ff0d4de0ff89e1fbf2f4d8a7f96a0b86203d1de0b6db7413d37bc90af",
+          "size": 4125504
+        },
+        {
+          "name": "libQnnHtpPrepare.so",
+          "path": "jni/arm64-v8a/libQnnHtpPrepare.so",
+          "sha256": "1e6e63467675a12562b6f317c39345144fb7383dd4d0314b4bde0d25d2b17f59",
+          "size": 88106984
+        },
+        {
+          "name": "libQnnHtp.so",
+          "path": "jni/arm64-v8a/libQnnHtp.so",
+          "sha256": "ebf19c66128da2169176d298b30fcd149d14e2d03f96e629538e26f56b7e2d7d",
+          "size": 4158496
+        },
+        {
+          "name": "libQnnHtpV68Stub.so",
+          "path": "jni/arm64-v8a/libQnnHtpV68Stub.so",
+          "sha256": "4128433f57dd2bcfb57ec960b71860f8b67b46f70d6216c9a09389b8185d5cbc",
+          "size": 795440
+        },
+        {
+          "name": "libQnnHtpV69Stub.so",
+          "path": "jni/arm64-v8a/libQnnHtpV69Stub.so",
+          "sha256": "1614baad47088ff5c15d9aead8509cdd7999fb16adb8379e9f8c6b113f74c930",
+          "size": 795440
+        },
+        {
+          "name": "libQnnHtpV73Stub.so",
+          "path": "jni/arm64-v8a/libQnnHtpV73Stub.so",
+          "sha256": "11f8a0fe4ae121c135b552febcd884048222e56c4da7db528c5a7fe5f18edf91",
+          "size": 802904
+        },
+        {
+          "name": "libQnnHtpV75Stub.so",
+          "path": "jni/arm64-v8a/libQnnHtpV75Stub.so",
+          "sha256": "ecbb2eec558fd1ba818e5da7dbfcd34484f4cdabe569b86a9d4fa5ef6e646157",
+          "size": 802904
+        },
+        {
+          "name": "libQnnHtpV79Stub.so",
+          "path": "jni/arm64-v8a/libQnnHtpV79Stub.so",
+          "sha256": "21ea3c0d52646332c2312129a90014ed3e6255d198a0109e9c991dd4bacaecf7",
+          "size": 802904
+        },
+        {
+          "name": "libQnnHtpV81Stub.so",
+          "path": "jni/arm64-v8a/libQnnHtpV81Stub.so",
+          "sha256": "c610ff7a508fa4abb44ef90e2f490035879fa9c19314bac9b2faed3b4aa5cc45",
+          "size": 827328
+        },
+        {
+          "name": "libQnnHtpV68Skel.so",
+          "path": "jni/arm64-v8a/libQnnHtpV68Skel.so",
+          "sha256": "8ec5c35d40c3c41101a19f201a8606c4c3d337ce4c14c387f87190b286849ec2",
+          "size": 13136716
+        },
+        {
+          "name": "libQnnHtpV69Skel.so",
+          "path": "jni/arm64-v8a/libQnnHtpV69Skel.so",
+          "sha256": "c09d91bea6f95a40c5adff7ac04394893f5eee777a71b58eb4fd64249128151b",
+          "size": 13180108
+        },
+        {
+          "name": "libQnnHtpV73Skel.so",
+          "path": "jni/arm64-v8a/libQnnHtpV73Skel.so",
+          "sha256": "686371152962293fcfcb1f025a12aeccc9a9f610bc307d5991bd7c55f28c8179",
+          "size": 19685168
+        },
+        {
+          "name": "libQnnHtpV75Skel.so",
+          "path": "jni/arm64-v8a/libQnnHtpV75Skel.so",
+          "sha256": "6cab0630a3fc9ba93368905660455ea916a61c208e162354b54bebd1ef950941",
+          "size": 19664660
+        },
+        {
+          "name": "libQnnHtpV79Skel.so",
+          "path": "jni/arm64-v8a/libQnnHtpV79Skel.so",
+          "sha256": "43c87a5df1e970ba3e518b9ee33962036dd111ac9331dea6be154d8ff460ede8",
+          "size": 19486584
+        },
+        {
+          "name": "libQnnHtpV81Skel.so",
+          "path": "jni/arm64-v8a/libQnnHtpV81Skel.so",
+          "sha256": "5e858eb739f75ab155d58977c9ab4fa678376881d4dae5cc260fb1cf2eab14c1",
+          "size": 20677132
+        }
+      ]
+    }
+  },
+  "rules": [
+    {
+      "comment": "Linux x86_64: Microsoft's ONNX Runtime",
+      "match": {
+        "os": "linux",
+        "arch": "amd64"
+      },
+      "runtime": {
+        "core": "onnxruntime-linux-x64-1.29.0/libonnxruntime.so"
+      }
+    },
+    {
+      "comment": "Linux aarch64: Microsoft's ONNX Runtime",
+      "match": {
+        "os": "linux",
+        "arch": "arm64"
+      },
+      "runtime": {
+        "core": "onnxruntime-linux-arm64-1.29.0/libonnxruntime.so"
+      }
+    },
+    {
+      "comment": "macOS arm64: Microsoft's ONNX Runtime, CoreML first",
+      "match": {
+        "os": "darwin",
+        "arch": "arm64"
+      },
+      "runtime": {
+        "core": "onnxruntime-macos-arm64-1.29.0/libonnxruntime.dylib",
+        "eps": [
+          {
+            "name": "CoreML"
+          }
+        ]
+      }
+    },
+    {
+      "comment": "Windows x64: Microsoft's ONNX Runtime",
+      "match": {
+        "os": "windows",
+        "arch": "amd64"
+      },
+      "runtime": {
+        "core": "onnxruntime-windows-x64-1.29.0/onnxruntime.dll"
+      }
+    },
+    {
+      "comment": "Android arm64: Microsoft's ONNX Runtime on the CPU with XNNPACK (NNAPI reaches a vendor NPU on few phones and is slower than the CPU on the rest)",
+      "match": {
+        "os": "android",
+        "arch": "arm64"
+      },
+      "runtime": {
+        "core": "onnxruntime-android-arm64-1.29.0/libonnxruntime.so",
+        "eps": [
+          {
+            "name": "XNNPACK"
+          }
+        ]
+      }
+    },
+    {
+      "comment": "Qualcomm Snapdragon: Qualcomm's QNN plugin on the HTP (NPU), then XNNPACK. The HTP library picks the stub of the phone's Hexagon generation by name, so all stubs are preloaded; the NPU loads the matching skel from ADSP_LIBRARY_PATH",
+      "match": {
+        "os": "android",
+        "arch": "arm64",
+        "soc.manufacturer": "QTI"
+      },
+      "runtime": {
+        "plugins": {
+          "QNN": "onnxruntime-qnn-android-2.7.0/libonnxruntime_providers_qnn.so"
+        },
+        "preload": [
+          "qnn-htp-android-2.51.0/libQnnSystem.so",
+          "qnn-htp-android-2.51.0/libQnnHtpPrepare.so",
+          "qnn-htp-android-2.51.0/libQnnHtp.so",
+          "qnn-htp-android-2.51.0/libQnnHtpV68Stub.so",
+          "qnn-htp-android-2.51.0/libQnnHtpV69Stub.so",
+          "qnn-htp-android-2.51.0/libQnnHtpV73Stub.so",
+          "qnn-htp-android-2.51.0/libQnnHtpV75Stub.so",
+          "qnn-htp-android-2.51.0/libQnnHtpV79Stub.so",
+          "qnn-htp-android-2.51.0/libQnnHtpV81Stub.so"
+        ],
+        "env": {
+          "ADSP_LIBRARY_PATH": "${pkg:qnn-htp-android-2.51.0}"
+        },
+        "eps": [
+          {
+            "name": "QNN",
+            "options": {
+              "backend_path": "${pkg:qnn-htp-android-2.51.0}/libQnnHtp.so"
+            }
+          },
+          {
+            "name": "XNNPACK"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -23,6 +23,32 @@ type SessionOptions struct {
 	IntraOpThreads     int
 	InterOpThreads     int
 	LogLevel           int
+
+	// GraphOptimization is how much ONNX Runtime rewrites the graph before
+	// handing it to execution providers. Zero: all it can.
+	GraphOptimization GraphOptimization
+}
+
+// GraphOptimization is an ONNX Runtime graph optimization level.
+type GraphOptimization int
+
+const (
+	GraphOptimizeAll      GraphOptimization = iota // ORT_ENABLE_ALL
+	GraphOptimizeNone                              // ORT_DISABLE_ALL
+	GraphOptimizeBasic                             // ORT_ENABLE_BASIC
+	GraphOptimizeExtended                          // ORT_ENABLE_EXTENDED
+)
+
+func (g GraphOptimization) ort() uintptr {
+	switch g {
+	case GraphOptimizeNone:
+		return 0
+	case GraphOptimizeBasic:
+		return 1
+	case GraphOptimizeExtended:
+		return 2
+	}
+	return ortEnableAll
 }
 
 // ExecutionProvider specifies a preferred EP.
@@ -155,7 +181,7 @@ func (s *Session) tryCreateSession(modelPath string, opts SessionOptions, ep *Ex
 		return err
 	}
 
-	_ = rt.call(slotSetSessionGraphOptimizationLevel, sopts, uintptr(ortEnableAll), 0, 0, 0, 0, 0, 0)
+	_ = rt.call(slotSetSessionGraphOptimizationLevel, sopts, opts.GraphOptimization.ort(), 0, 0, 0, 0, 0, 0)
 	if opts.IntraOpThreads > 0 {
 		_ = rt.call(slotSetIntraOpNumThreads, sopts, uintptr(opts.IntraOpThreads), 0, 0, 0, 0, 0, 0)
 	}
@@ -215,6 +241,12 @@ var epV2Names = map[string]string{
 }
 
 func (s *Session) appendEP(ep ExecutionProvider) error {
+	if s.rt.isPluginEP(ep.Name) {
+		return s.appendEPPlugin(ep)
+	}
+	if ep.Name == "CUDA" || ep.Name == "CUDAExecutionProvider" {
+		return s.appendCUDA(ep)
+	}
 	if sym, ok := epStandaloneFuncs[ep.Name]; ok {
 		return s.appendEPStandalone(sym, ep)
 	}
@@ -246,6 +278,55 @@ func (s *Session) appendEPStandalone(symbol string, ep ExecutionProvider) error 
 	status := ortCall(uintptr(fn),
 		uintptr(s.opts), uintptr(deviceID), 0, 0, 0, 0, 0, 0)
 	return s.rt.check(uintptr(status))
+}
+
+// appendCUDA appends the CUDA EP through the V2 provider-options API so EP
+// options (device_id, gpu_mem_limit, ...) are honored. The arena defaults to
+// growing by exactly what is requested: the ORT default (next power of two)
+// can more than double peak VRAM for large models such as SAM 3.
+func (s *Session) appendCUDA(ep ExecutionProvider) error {
+	preloadCudnnOnce.Do(func() { dlPreloadGlobal("libcudnn.so.9", "libcudnn.so") })
+
+	opts := map[string]string{"arena_extend_strategy": "kSameAsRequested"}
+	for k, v := range ep.Options {
+		opts[k] = v
+	}
+
+	rt := s.rt
+	var cudaOpts uintptr
+	if err := rt.call(slotCreateCUDAProviderOptions,
+		uintptr(unsafe.Pointer(&cudaOpts)), 0, 0, 0, 0, 0, 0, 0); err != nil {
+		return err
+	}
+	defer rt.release(slotReleaseCUDAProviderOptions, cudaOpts)
+
+	keys, vals, keep := cstringArrays(opts)
+	var keysPtr, valsPtr unsafe.Pointer
+	if len(keys) > 0 {
+		keysPtr, valsPtr = unsafe.Pointer(&keys[0]), unsafe.Pointer(&vals[0])
+	}
+	err := rt.call(slotUpdateCUDAProviderOptions,
+		cudaOpts, uintptr(keysPtr), uintptr(valsPtr), uintptr(len(keys)), 0, 0, 0, 0)
+	runtime.KeepAlive(keys)
+	runtime.KeepAlive(vals)
+	runtime.KeepAlive(keep)
+	if err != nil {
+		return err
+	}
+	return rt.call(slotSessionOptionsAppendExecutionProviderCUDAV2,
+		uintptr(s.opts), cudaOpts, 0, 0, 0, 0, 0, 0)
+}
+
+// cstringArrays converts a map into parallel arrays of C string pointers.
+// keep must stay alive until the pointers are no longer used.
+func cstringArrays(m map[string]string) (keys, vals []unsafe.Pointer, keep [][]byte) {
+	for k, v := range m {
+		kb, vb := cstring(k), cstring(v)
+		keep = append(keep, kb, vb)
+		keys = append(keys, unsafe.Pointer(&kb[0]))
+		vals = append(vals, unsafe.Pointer(&vb[0]))
+	}
+	return keys, vals, keep
 }
 
 func (s *Session) appendEPGeneric(ep ExecutionProvider) error {

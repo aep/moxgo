@@ -25,7 +25,7 @@ var (
 
 func init() {
 	rootCmd.AddCommand(sam3Cmd)
-	sam3Cmd.Flags().StringVar(&sam3Dir, "dir", "/shared/sam3", "directory with the SAM3 onnx models + config.yaml")
+	sam3Cmd.Flags().StringVar(&sam3Dir, "dir", "models/sam3", "directory with the SAM3 onnx models + config.yaml")
 	sam3Cmd.Flags().StringVar(&sam3Prompts, "prompt", "", "comma-separated text prompts (e.g. \"boat,buoy,wind turbine\")")
 	sam3Cmd.Flags().Float32Var(&sam3Threshold, "threshold", 0.5, "score threshold")
 	sam3Cmd.Flags().StringVar(&sam3EP, "ep", "", "execution provider override (CUDA, CPU; empty=auto)")

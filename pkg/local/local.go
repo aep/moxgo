@@ -18,8 +18,15 @@ import (
 // Options for New. The zero value auto-detects the ONNX runtime and uses
 // pulled models only.
 type Options struct {
-	// LibPath is the ONNX runtime shared library. Empty: platform defaults.
+	// LibPath is the ONNX runtime shared library. Empty: Runtime, else
+	// platform defaults.
 	LibPath string
+
+	// Runtime, when set and LibPath is empty, loads the ONNX Runtime that
+	// moxgo's runtime rules give this device from the packages the build
+	// bundled, and gives each model the execution providers the rules give
+	// it, downloading those packages the rules allow when first needed.
+	Runtime *RuntimeOptions
 
 	// ConfigPath is a model registry YAML file (moxgo.yaml). Empty or
 	// missing: none.
@@ -33,19 +40,26 @@ type Options struct {
 // New loads the ONNX runtime and the models. The caller must call Close on
 // the returned server's runtime via Close when done.
 func New(opts Options) (*server.Server, *onnx.Runtime, error) {
+	warn := opts.Warnings
+	if warn == nil {
+		warn = os.Stderr
+	}
 	var rt *onnx.Runtime
+	var sel *runtimeSelector
 	var err error
-	if opts.LibPath != "" {
+	switch {
+	case opts.LibPath != "":
 		rt, err = onnx.LoadFrom(opts.LibPath)
-	} else {
+	case opts.Runtime != nil:
+		sel, err = newRuntimeSelector(*opts.Runtime, warn)
+		if err == nil {
+			rt, err = sel.load()
+		}
+	default:
 		rt, err = onnx.Load()
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("load ONNX Runtime: %w", err)
-	}
-	warn := opts.Warnings
-	if warn == nil {
-		warn = os.Stderr
 	}
 
 	reg := server.NewRegistry()
@@ -67,7 +81,11 @@ func New(opts Options) (*server.Server, *onnx.Runtime, error) {
 		}
 	}
 
-	return server.New(rt, reg, Pull), rt, nil
+	srv := server.New(rt, reg, Pull)
+	if sel != nil {
+		srv.SetEPResolver(sel.eps)
+	}
+	return srv, rt, nil
 }
 
 // Pull downloads a model from the public registry to ~/.moxgo/models.
@@ -77,6 +95,7 @@ func Pull(name string, progress func(string, int64, int64)) (*server.ModelConfig
 			progress(p.File, p.Total, p.Downloaded)
 		}
 	}
+	name = registry.CanonicalName(name)
 	if _, err := registry.Pull(registry.DefaultRegistry, name, cb); err != nil {
 		return nil, err
 	}

@@ -13,6 +13,11 @@ func dlOpen(path string) (uintptr, error) {
 	return uintptr(h), nil
 }
 
+// dlOpenGlobal is dlOpen: Windows matches loaded DLLs by name anyway.
+func dlOpenGlobal(path string) (uintptr, error) {
+	return dlOpen(path)
+}
+
 func dlSym(lib uintptr, name string) (uintptr, error) {
 	proc, err := syscall.GetProcAddress(syscall.Handle(lib), name)
 	if err != nil {

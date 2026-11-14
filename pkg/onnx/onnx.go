@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -104,50 +105,60 @@ type TensorInfo struct {
 
 // ORT API vtable slot indices.
 const (
-	slotGetErrorMessage                       = 2
-	slotCreateEnv                             = 3
-	slotCreateSession                         = 7
-	slotRun                                   = 9
-	slotCreateSessionOptions                  = 10
-	slotSetSessionGraphOptimizationLevel      = 23
-	slotSetIntraOpNumThreads                  = 24
-	slotSetInterOpNumThreads                  = 25
-	slotSessionGetInputCount                  = 30
-	slotSessionGetOutputCount                 = 31
-	slotSessionGetInputTypeInfo               = 33
-	slotSessionGetOutputTypeInfo              = 34
-	slotSessionGetInputName                   = 36
-	slotSessionGetOutputName                  = 37
-	slotCreateTensorWithDataAsOrtValue        = 49
-	slotGetTensorMutableData                  = 51
-	slotCastTypeInfoToTensorInfo              = 55
-	slotGetTensorElementType                  = 60
-	slotGetDimensionsCount                    = 61
-	slotGetDimensions                         = 62
-	slotGetTensorTypeAndShape                 = 65
-	slotCreateCpuMemoryInfo                   = 69
-	slotAllocatorFree                         = 76
-	slotGetAllocatorWithDefaultOptions        = 78
-	slotReleaseEnv                            = 92
-	slotReleaseStatus                         = 93
-	slotReleaseMemoryInfo                     = 94
-	slotReleaseSession                        = 95
-	slotReleaseValue                          = 96
-	slotReleaseTypeInfo                       = 98
-	slotReleaseTensorTypeAndShapeInfo         = 99
-	slotReleaseSessionOptions                 = 100
-	slotSessionGetModelMetadata               = 111
-	slotModelMetadataGetProducerName          = 112
-	slotModelMetadataGetGraphName             = 113
-	slotModelMetadataGetDomain                = 114
-	slotModelMetadataGetDescription           = 115
-	slotModelMetadataLookupCustomMetadataMap  = 116
-	slotModelMetadataGetVersion               = 117
-	slotReleaseModelMetadata                  = 118
-	slotModelMetadataGetCustomMetadataMapKeys = 123
-	slotGetAvailableProviders                 = 125
-	slotReleaseAvailableProviders             = 126
-	slotSessionOptionsAppendExecutionProvider = 216
+	slotGetErrorMessage                             = 2
+	slotCreateEnv                                   = 3
+	slotCreateSession                               = 7
+	slotRun                                         = 9
+	slotCreateSessionOptions                        = 10
+	slotSetSessionGraphOptimizationLevel            = 23
+	slotSetIntraOpNumThreads                        = 24
+	slotSetInterOpNumThreads                        = 25
+	slotSessionGetInputCount                        = 30
+	slotSessionGetOutputCount                       = 31
+	slotSessionGetInputTypeInfo                     = 33
+	slotSessionGetOutputTypeInfo                    = 34
+	slotSessionGetInputName                         = 36
+	slotSessionGetOutputName                        = 37
+	slotCreateTensorWithDataAsOrtValue              = 49
+	slotGetTensorMutableData                        = 51
+	slotCastTypeInfoToTensorInfo                    = 55
+	slotGetTensorElementType                        = 60
+	slotGetDimensionsCount                          = 61
+	slotGetDimensions                               = 62
+	slotGetTensorTypeAndShape                       = 65
+	slotCreateCpuMemoryInfo                         = 69
+	slotAllocatorFree                               = 76
+	slotGetAllocatorWithDefaultOptions              = 78
+	slotReleaseEnv                                  = 92
+	slotReleaseStatus                               = 93
+	slotReleaseMemoryInfo                           = 94
+	slotReleaseSession                              = 95
+	slotReleaseValue                                = 96
+	slotReleaseTypeInfo                             = 98
+	slotReleaseTensorTypeAndShapeInfo               = 99
+	slotReleaseSessionOptions                       = 100
+	slotSessionGetModelMetadata                     = 111
+	slotModelMetadataGetProducerName                = 112
+	slotModelMetadataGetGraphName                   = 113
+	slotModelMetadataGetDomain                      = 114
+	slotModelMetadataGetDescription                 = 115
+	slotModelMetadataLookupCustomMetadataMap        = 116
+	slotModelMetadataGetVersion                     = 117
+	slotReleaseModelMetadata                        = 118
+	slotModelMetadataGetCustomMetadataMapKeys       = 123
+	slotGetAvailableProviders                       = 125
+	slotReleaseAvailableProviders                   = 126
+	slotSessionOptionsAppendExecutionProviderCUDAV2 = 204
+	slotCreateCUDAProviderOptions                   = 205
+	slotUpdateCUDAProviderOptions                   = 206
+	slotReleaseCUDAProviderOptions                  = 208
+	slotSessionOptionsAppendExecutionProvider       = 216
+
+	// Plugin execution providers, API version 22 (ORT 1.22) and later.
+	slotRegisterExecutionProviderLibrary        = 301
+	slotGetEpDevices                            = 303
+	slotSessionOptionsAppendExecutionProviderV2 = 304
+	slotEpDeviceEpName                          = 312
 )
 
 // Runtime holds the dynamically loaded ONNX Runtime library and API pointers.
@@ -159,6 +170,12 @@ type Runtime struct {
 
 	// Cached from OrtApiBase for VersionString
 	versionStr string
+
+	// Plugin execution providers live in the process's one OrtEnv, which
+	// the runtime keeps alive once one is registered (see plugin.go).
+	pluginMu sync.Mutex
+	env      uintptr
+	plugins  map[string]string // registration name -> library path
 }
 
 // vtable reads a function pointer from the OrtApi vtable at the given slot.
@@ -313,6 +330,7 @@ func (rt *Runtime) VersionString() string {
 
 // Close releases the shared library handle.
 func (rt *Runtime) Close() {
+	rt.releaseEnv()
 	if rt.lib != 0 {
 		_ = dlClose(rt.lib)
 		rt.lib = 0

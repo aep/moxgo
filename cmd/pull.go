@@ -96,6 +96,9 @@ var searchCmd = &cobra.Command{
 		fmt.Printf("%-30s %-10s %-20s %s\n", "NAME", "SIZE", "LICENSE", "DESCRIPTION")
 		for _, m := range idx.Models {
 			fmt.Printf("%-30s %-10s %-20s %s\n", m.Name, formatSize(m.Size), m.License, m.Description)
+			for _, v := range m.Variants {
+				fmt.Printf("%-30s %-10s %-20s %s\n", "  "+m.Name+":"+v.Tag, formatSize(v.Size), "", v.Description)
+			}
 		}
 		return nil
 	},

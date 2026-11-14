@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,8 +31,15 @@ func New(rt *onnx.Runtime, reg *Registry, pull PullFunc) *Server {
 	}
 }
 
-func (s *Server) Handler() (string, http.Handler) {
-	return gomaxv1connect.NewInferenceServiceHandler(s)
+// SetEPResolver makes f pick the execution providers of models that do
+// not name one, instead of trying all the runtime has. Call it before the
+// server runs models.
+func (s *Server) SetEPResolver(f EPResolver) {
+	s.mgr.epResolver = f
+}
+
+func (s *Server) Handler(opts ...connect.HandlerOption) (string, http.Handler) {
+	return gomaxv1connect.NewInferenceServiceHandler(s, opts...)
 }
 
 func (s *Server) Shutdown() {
@@ -142,7 +150,7 @@ func (s *Server) Predict(_ context.Context, req *connect.Request[gomaxv1.Predict
 	}
 	resp, err := inst.Predict(req.Msg.Inputs)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, connect.NewError(errorCode(err), err)
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -187,4 +195,13 @@ func (s *Server) AddModel(cfg *ModelConfig) error {
 		_ = s.mgr.Rm(cfg.Name)
 	}
 	return nil
+}
+
+// errorCode maps request problems to InvalidArgument, anything else to Internal.
+func errorCode(err error) connect.Code {
+	var ie *InputError
+	if errors.As(err, &ie) {
+		return connect.CodeInvalidArgument
+	}
+	return connect.CodeInternal
 }

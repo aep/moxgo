@@ -25,10 +25,11 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "moxgo",
-	Short:        "moxgo inference engine",
-	Long:         "ONNX model inference server and client.",
-	SilenceUsage: true,
+	Use:           "moxgo",
+	Short:         "moxgo inference engine",
+	Long:          "ONNX model inference server and client.",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	PersistentPostRun: func(_ *cobra.Command, _ []string) {
 		if localSrv != nil {
 			localSrv.Shutdown()
@@ -181,4 +182,18 @@ func newInput(name string, data []byte) []*gomaxv1.Input {
 		Name: name,
 		Data: &gomaxv1.Input_FileBytes{FileBytes: data},
 	}}
+}
+
+// withPrompt adds a "prompt" text input (for sam3 pipelines) if prompt is set.
+func withPrompt(in []*gomaxv1.Input, prompt string) []*gomaxv1.Input {
+	if prompt == "" {
+		return in
+	}
+	if len(in) == 1 && in[0].Name == "" {
+		in[0].Name = "image"
+	}
+	return append(in, &gomaxv1.Input{
+		Name: "prompt",
+		Data: &gomaxv1.Input_FileBytes{FileBytes: []byte(prompt)},
+	})
 }

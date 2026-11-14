@@ -41,3 +41,7 @@ models:
         type: classification
         labels: models/birdnet-v3-labels.csv
         sigmoid: 1.0
+
+  sam3:
+    pipeline: sam3
+    path: models/sam3

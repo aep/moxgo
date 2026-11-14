@@ -14,5 +14,9 @@ import (
 // The caller owns the returned runtime and must Close it (and Shutdown the
 // server) when done.
 func newLocalServer() (*server.Server, *onnx.Runtime, error) {
-	return local.New(local.Options{LibPath: libPath, ConfigPath: configPath})
+	rtOpts, err := runtimeOptions()
+	if err != nil {
+		return nil, nil, err
+	}
+	return local.New(local.Options{LibPath: libPath, ConfigPath: configPath, Runtime: rtOpts})
 }

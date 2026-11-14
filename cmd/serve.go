@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    %-20s %s\n", m.Name, m.Path)
 	}
 
-	path, handler := srv.Handler()
+	path, handler := srv.Handler(connect.WithInterceptors(errorRecorder{}))
 	mux := http.NewServeMux()
 	mux.Handle(path, logRequests(handler))
 
@@ -87,14 +88,50 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
-		next.ServeHTTP(sw, r)
+		rpcErr := new(error)
+		next.ServeHTTP(sw, r.WithContext(context.WithValue(r.Context(), rpcErrKey{}, rpcErr)))
 		// Extract RPC method from path (last component)
 		method := r.URL.Path
 		if i := strings.LastIndex(method, "/"); i >= 0 {
 			method = method[i+1:]
 		}
+		if *rpcErr != nil {
+			logger.Printf("%s %s %d %v: %v", r.RemoteAddr, method, sw.status, time.Since(start), *rpcErr)
+			return
+		}
 		logger.Printf("%s %s %d %v", r.RemoteAddr, method, sw.status, time.Since(start))
 	})
+}
+
+// rpcErrKey carries a *error from logRequests to errorRecorder, which fills it
+// with the RPC's error so the access log can show why a call failed. (gRPC
+// reports errors in trailers with HTTP 200, so the status alone can't tell.)
+type rpcErrKey struct{}
+
+type errorRecorder struct{}
+
+func (errorRecorder) record(ctx context.Context, err error) error {
+	if p, ok := ctx.Value(rpcErrKey{}).(*error); ok && err != nil {
+		*p = err
+	}
+	return err
+}
+
+func (e errorRecorder) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		resp, err := next(ctx, req)
+		return resp, e.record(ctx, err)
+	}
+}
+
+func (errorRecorder) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
+
+func (e errorRecorder) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		return e.record(ctx, next(ctx, conn))
+	}
 }
 
 type statusWriter struct {

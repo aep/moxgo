@@ -8,6 +8,10 @@ func dlOpen(path string) (uintptr, error) {
 	return purego.Dlopen(path, purego.RTLD_LAZY|purego.RTLD_LOCAL)
 }
 
+func dlOpenGlobal(path string) (uintptr, error) {
+	return purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+}
+
 func dlSym(lib uintptr, name string) (uintptr, error) {
 	return purego.Dlsym(lib, name)
 }

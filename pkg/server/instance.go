@@ -12,6 +12,7 @@ import (
 	goimage "github.com/aep/moxgo/pkg/image"
 	"github.com/aep/moxgo/pkg/onnx"
 	gomaxv1 "github.com/aep/moxgo/pkg/proto/gomax/v1"
+	"github.com/aep/moxgo/pkg/sam3"
 )
 
 const poolSize = 4
@@ -34,7 +35,16 @@ type Instance struct {
 	slots  chan *runSlot
 	mu     sync.Mutex
 	closed bool
+
+	// sam3 is set instead of Session for a sam3 pipeline.
+	sam3   *sam3.Model
+	sam3mu sync.Mutex // serializes sam3 runs: each one needs GBs of VRAM
 }
+
+// defaultThreads is the intra-op threads of models that set none: two
+// roughly halves inference time on phones' CPUs over one, and leaves cores
+// for the rest of the device.
+const defaultThreads = 2
 
 // InstanceManager manages running model instances.
 type InstanceManager struct {
@@ -43,7 +53,16 @@ type InstanceManager struct {
 
 	mu        sync.RWMutex
 	instances map[string]*Instance
+
+	// epResolver, if set, picks the execution providers of models that
+	// name none (see Server.SetEPResolver).
+	epResolver EPResolver
 }
+
+// EPResolver returns the execution providers to try for a model, in order;
+// the CPU is the fallback. ok false leaves the choice to moxgo, which tries
+// all providers the runtime has.
+type EPResolver func(cfg *ModelConfig) (eps []onnx.ExecutionProvider, ok bool, err error)
 
 func NewInstanceManager(rt *onnx.Runtime, reg *Registry) *InstanceManager {
 	return &InstanceManager{
@@ -57,6 +76,7 @@ func NewInstanceManager(rt *onnx.Runtime, reg *Registry) *InstanceManager {
 // The ep parameter overrides the execution provider for initial load; it is
 // ignored if the model is already running.
 func (m *InstanceManager) Run(modelName string, ep string) (*Instance, error) {
+	modelName = ModelName(modelName)
 	m.mu.RLock()
 	if inst, ok := m.instances[modelName]; ok {
 		m.mu.RUnlock()
@@ -71,11 +91,26 @@ func (m *InstanceManager) Run(modelName string, ep string) (*Instance, error) {
 
 	threads := cfg.Threads
 	if threads <= 0 {
-		threads = 1
+		threads = defaultThreads
+	}
+
+	if cfg.Pipeline == "sam3" {
+		return m.runSAM3(cfg, ep, threads)
 	}
 
 	var eps []onnx.ExecutionProvider
-	if ep != "" {
+	resolved := false
+	if ep == "" && cfg.EP == "" && m.epResolver != nil {
+		var err error
+		eps, resolved, err = m.epResolver(cfg)
+		if err != nil {
+			fmt.Printf("  %s: runtime: %v; using the providers the runtime has\n", modelName, err)
+			eps, resolved = nil, false
+		}
+	}
+	if resolved {
+		// eps as the runtime rules give them
+	} else if ep != "" {
 		eps = append(eps, onnx.ExecutionProvider{Name: ep})
 	} else if cfg.EP != "" {
 		eps = append(eps, onnx.ExecutionProvider{Name: cfg.EP})
@@ -114,21 +149,26 @@ func (m *InstanceManager) Run(modelName string, ep string) (*Instance, error) {
 		slots:    make(chan *runSlot, poolSize),
 	}
 
-	m.mu.Lock()
-	// Check again under write lock (race)
-	if existing, ok := m.instances[modelName]; ok {
-		m.mu.Unlock()
-		sess.Close()
-		return existing, nil
-	}
-	m.instances[modelName] = inst
-	m.mu.Unlock()
+	return m.register(inst), nil
+}
 
-	return inst, nil
+// register adds a new instance, or returns (and keeps) one that another
+// caller loaded meanwhile, closing inst.
+func (m *InstanceManager) register(inst *Instance) *Instance {
+	m.mu.Lock()
+	if existing, ok := m.instances[inst.Name]; ok {
+		m.mu.Unlock()
+		inst.close()
+		return existing
+	}
+	m.instances[inst.Name] = inst
+	m.mu.Unlock()
+	return inst
 }
 
 // GetOrRun returns a running instance, auto-loading if needed.
 func (m *InstanceManager) GetOrRun(modelName string) (*Instance, error) {
+	modelName = ModelName(modelName)
 	m.mu.RLock()
 	inst, ok := m.instances[modelName]
 	m.mu.RUnlock()
@@ -140,6 +180,7 @@ func (m *InstanceManager) GetOrRun(modelName string) (*Instance, error) {
 
 // Rm stops and removes a model instance.
 func (m *InstanceManager) Rm(modelName string) error {
+	modelName = ModelName(modelName)
 	m.mu.Lock()
 	inst, ok := m.instances[modelName]
 	if !ok {
@@ -233,6 +274,11 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 	}
 	inst.mu.Unlock()
 
+	if inst.sam3 != nil {
+		return inst.predictSAM3(inputs)
+	}
+	inputs = withoutPrompt(inst.Config, inputs)
+
 	slot := inst.acquireSlot()
 	defer inst.releaseSlot(slot)
 
@@ -240,14 +286,14 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 	for i, inp := range inst.Config.InputList {
 		reqInput := findInput(inputs, inp.Name)
 		if reqInput == nil {
-			return nil, fmt.Errorf("missing input %q", inp.Name)
+			return nil, inputErrorf("missing input %q", inp.Name)
 		}
 
 		switch inp.Type {
 		case "image":
 			tensor, err := goimage.Decode(bytes.NewReader(reqInput.GetFileBytes()), inp.Width, inp.Height)
 			if err != nil {
-				return nil, fmt.Errorf("decode image %q: %w", inp.Name, err)
+				return nil, inputErrorf("decode image %q: %w", inp.Name, err)
 			}
 			copy(slot.bufs[i], tensor.Data)
 			if len(inp.Mean) > 0 && len(inp.Std) > 0 {
@@ -261,7 +307,7 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 				MaxSamples: inp.InputSize(),
 			})
 			if err != nil {
-				return nil, fmt.Errorf("decode audio %q: %w", inp.Name, err)
+				return nil, inputErrorf("decode audio %q: %w", inp.Name, err)
 			}
 			n := copy(slot.bufs[i], at.Data)
 			for j := n; j < len(slot.bufs[i]); j++ {
@@ -271,7 +317,7 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 		case "raw":
 			rawData := rawTensorToFloat32(reqInput.GetTensor())
 			if len(rawData) != len(slot.bufs[i]) {
-				return nil, fmt.Errorf("input %q: size %d != expected %d", inp.Name, len(rawData), len(slot.bufs[i]))
+				return nil, inputErrorf("input %q: size %d != expected %d", inp.Name, len(rawData), len(slot.bufs[i]))
 			}
 			copy(slot.bufs[i], rawData)
 		}
@@ -320,7 +366,7 @@ func (inst *Instance) PredictChunked(inputs []*gomaxv1.Input, fn func(*gomaxv1.P
 	}
 	inst.mu.Unlock()
 
-	if len(inst.Config.InputList) != 1 || inst.Config.InputList[0].Type != "audio" {
+	if inst.sam3 != nil || len(inst.Config.InputList) != 1 || inst.Config.InputList[0].Type != "audio" {
 		return fmt.Errorf("streaming only supported for single-audio-input models")
 	}
 	inp := inst.Config.InputList[0]
@@ -407,7 +453,14 @@ func (inst *Instance) close() {
 	for slot := range inst.slots {
 		slot.run.Close()
 	}
-	inst.Session.Close()
+	if inst.Session != nil {
+		inst.Session.Close()
+	}
+	if inst.sam3 != nil {
+		inst.sam3mu.Lock()
+		inst.sam3.Close()
+		inst.sam3mu.Unlock()
+	}
 }
 
 func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTensor *goimage.Tensor, slot *runSlot) *gomaxv1.OutputResult {
@@ -461,6 +514,21 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 	}
 
 	return or
+}
+
+// withoutPrompt drops a "prompt" input the model does not have, so clients
+// can send prompts without knowing whether the model uses them.
+func withoutPrompt(cfg *ModelConfig, inputs []*gomaxv1.Input) []*gomaxv1.Input {
+	if _, ok := cfg.Inputs[sam3PromptInput]; ok {
+		return inputs
+	}
+	out := inputs[:0:0]
+	for _, in := range inputs {
+		if in.Name != sam3PromptInput {
+			out = append(out, in)
+		}
+	}
+	return out
 }
 
 func findInput(inputs []*gomaxv1.Input, name string) *gomaxv1.Input {

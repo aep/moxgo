@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/aep/moxgo/pkg/labels"
@@ -75,12 +76,25 @@ type OutputConfig struct {
 
 // ModelConfig defines a model in the registry.
 type ModelConfig struct {
-	Name    string                   `yaml:"-"`
-	Path    string                   `yaml:"path"`
-	EP      string                   `yaml:"ep"`
-	Threads int                      `yaml:"threads"`
-	Inputs  map[string]*InputConfig  `yaml:"inputs"`
-	Outputs map[string]*OutputConfig `yaml:"outputs"`
+	Name string `yaml:"-"`
+	Path string `yaml:"path"`
+	EP   string `yaml:"ep"`
+	// Needs are capabilities the model needs of its runtime; see
+	// SetEPResolver.
+	Needs   []string                `yaml:"needs"`
+	Threads int                     `yaml:"threads"`
+	Inputs  map[string]*InputConfig `yaml:"inputs"`
+
+	// Pipeline selects a built-in multi-model pipeline instead of a single
+	// ONNX graph. "sam3": path is a directory with the SAM 3 image encoder,
+	// language encoder and decoder (see pkg/sam3); inputs/outputs are fixed.
+	Pipeline string `yaml:"pipeline"`
+	// Prompts are the default text prompts of a sam3 pipeline, used when a
+	// request has no "prompt" input.
+	Prompts []string `yaml:"prompts"`
+	// Threshold is the minimum detection score of a sam3 pipeline (default 0.5).
+	Threshold float32                  `yaml:"threshold"`
+	Outputs   map[string]*OutputConfig `yaml:"outputs"`
 
 	// Ordered slices built after parsing for deterministic iteration.
 	InputList  []*InputConfig  `yaml:"-"`
@@ -214,10 +228,16 @@ func LoadRegistry(path string) (*Registry, error) {
 	return reg, nil
 }
 
+// ModelName is name without a default ":latest" variant tag: "yolo11n"
+// and "yolo11n:latest" are the same model.
+func ModelName(name string) string {
+	return strings.TrimSuffix(name, ":latest")
+}
+
 func (r *Registry) Get(name string) (*ModelConfig, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	m, ok := r.models[name]
+	m, ok := r.models[ModelName(name)]
 	return m, ok
 }
 
@@ -237,6 +257,13 @@ func validateModel(cfg *ModelConfig) error {
 	}
 	if _, err := os.Stat(cfg.Path); err != nil {
 		return fmt.Errorf("path %q: %w", cfg.Path, err)
+	}
+	switch cfg.Pipeline {
+	case "":
+	case "sam3":
+		return validateSAM3(cfg)
+	default:
+		return fmt.Errorf("unknown pipeline %q (want sam3)", cfg.Pipeline)
 	}
 	if len(cfg.Inputs) == 0 {
 		return fmt.Errorf("at least one input is required")

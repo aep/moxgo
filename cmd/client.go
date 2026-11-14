@@ -29,6 +29,7 @@ var (
 	runCameraID  int
 	runFPS       float64
 	runStream    string
+	runPrompt    string
 )
 
 func init() {
@@ -40,6 +41,7 @@ func init() {
 	runCmd.Flags().IntVar(&runCameraID, "camera-id", 0, "camera device index")
 	runCmd.Flags().Float64Var(&runFPS, "fps", 1, "frames per second for camera/stream capture")
 	runCmd.Flags().StringVar(&runStream, "stream", "", "video stream URL (http:// for MJPEG, rtsp:// for RTSP)")
+	runCmd.Flags().StringVar(&runPrompt, "prompt", "", "comma-separated text prompts (sam3 models)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -93,7 +95,7 @@ var runCmd = &cobra.Command{
 		pred, err := c.Predict(context.Background(),
 			connect.NewRequest(&gomaxv1.PredictRequest{
 				Model:  model,
-				Inputs: newInput(runInputName, data),
+				Inputs: withPrompt(newInput(runInputName, data), runPrompt),
 			}))
 		if err != nil {
 			return err
@@ -192,12 +194,14 @@ var (
 	predictFile      string
 	predictInputName string
 	predictJSON      bool
+	predictPrompt    string
 )
 
 func init() {
 	predictCmd.Flags().StringVarP(&predictFile, "file", "f", "", "input file (required)")
 	predictCmd.Flags().StringVarP(&predictInputName, "input", "n", "", "input name (optional if single input)")
 	predictCmd.Flags().BoolVar(&predictJSON, "json", false, "output raw JSON")
+	predictCmd.Flags().StringVar(&predictPrompt, "prompt", "", "comma-separated text prompts (sam3 models)")
 	_ = predictCmd.MarkFlagRequired("file")
 	rootCmd.AddCommand(predictCmd)
 }
@@ -218,7 +222,7 @@ var predictCmd = &cobra.Command{
 		resp, err := c.Predict(context.Background(),
 			connect.NewRequest(&gomaxv1.PredictRequest{
 				Model:  args[0],
-				Inputs: newInput(predictInputName, data),
+				Inputs: withPrompt(newInput(predictInputName, data), predictPrompt),
 			}))
 		if err != nil {
 			return err
@@ -390,7 +394,7 @@ func runVideoLoop(c backend, model string, cam camera.Camera) error {
 			pred, err := c.Predict(context.Background(),
 				connect.NewRequest(&gomaxv1.PredictRequest{
 					Model:  model,
-					Inputs: newInput(runInputName, buf.Bytes()),
+					Inputs: withPrompt(newInput(runInputName, buf.Bytes()), runPrompt),
 				}))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "predict error: %v\n", err)

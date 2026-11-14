@@ -38,8 +38,14 @@ type Progress struct {
 	Done       bool
 }
 
+// Pull downloads model variant name ("model" or "model:tag") from the
+// registry into its ModelDir.
 func Pull(registryURL, name string, progress func(Progress)) (*Manifest, error) {
-	resp, err := http.Get(registryURL + "/v1/" + name + ".json")
+	model, tag, err := SplitName(name)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.Get(registryURL + manifestPath(model, tag))
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest: %w", err)
 	}
@@ -57,7 +63,7 @@ func Pull(registryURL, name string, progress func(Progress)) (*Manifest, error) 
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 
-	dir, err := ModelDir(name)
+	dir, err := ModelDir(CanonicalName(name))
 	if err != nil {
 		return nil, err
 	}
