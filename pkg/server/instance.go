@@ -549,6 +549,15 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 				Detections: DetectOutput(data, result.Shape, oc.ResolvedLabels, imgTensor),
 			}
 		}
+	case "segmentation":
+		protos, err := slot.run.GetOutputByName(oc.Masks)
+		if err != nil || imgTensor == nil || protos.Dtype != onnx.ElemTypeFloat32 || len(protos.Shape) != 4 || protos.Len == 0 {
+			or.Result = &gomaxv1.OutputResult_Raw{Raw: RawOutput(data, result.Shape)}
+			break
+		}
+		or.Result = &gomaxv1.OutputResult_Detections{Detections: SegmentOutput(
+			data, result.Shape, unsafe.Slice((*float32)(protos.Ptr), protos.Len), protos.Shape,
+			oc.ResolvedLabels, imgTensor)}
 	case "classification":
 		or.Result = &gomaxv1.OutputResult_Classifications{
 			Classifications: ClassifyOutput(data, oc.ResolvedLabels, 10, oc.Sigmoid),

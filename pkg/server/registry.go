@@ -65,12 +65,15 @@ func (ic *InputConfig) ParamsMap() map[string]string {
 
 // OutputConfig describes a model output.
 type OutputConfig struct {
-	Name           string        `yaml:"-" json:"-"`
-	Type           string        `yaml:"type" json:"type"`
-	Decoder        string        `yaml:"decoder" json:"decoder,omitempty"`
-	Labels         string        `yaml:"labels" json:"labels,omitempty"`
-	Sigmoid        float64       `yaml:"sigmoid" json:"sigmoid,omitempty"`
-	Boxes          string        `yaml:"boxes" json:"boxes,omitempty"`
+	Name    string  `yaml:"-" json:"-"`
+	Type    string  `yaml:"type" json:"type"`
+	Decoder string  `yaml:"decoder" json:"decoder,omitempty"`
+	Labels  string  `yaml:"labels" json:"labels,omitempty"`
+	Sigmoid float64 `yaml:"sigmoid" json:"sigmoid,omitempty"`
+	Boxes   string  `yaml:"boxes" json:"boxes,omitempty"`
+	// Masks names the mask prototype tensor of a segmentation output, e.g.
+	// a YOLO -seg model's [1, 32, H/4, W/4] "output1".
+	Masks          string        `yaml:"masks" json:"masks,omitempty"`
 	ResolvedLabels labels.Labels `yaml:"-" json:"-"`
 }
 
@@ -289,8 +292,20 @@ func validateModel(cfg *ModelConfig) error {
 	for name, out := range cfg.Outputs {
 		switch out.Type {
 		case "classification", "detection", "embedding", "raw":
+		case "segmentation":
+			// YOLO -seg: detections, each with mask coefficients after its
+			// class scores, and a separate tensor of mask prototypes.
+			if out.Decoder == "" {
+				out.Decoder = "yolo"
+			}
+			if out.Decoder != "yolo" {
+				return fmt.Errorf("output %q: unknown segmentation decoder %q (want yolo)", name, out.Decoder)
+			}
+			if out.Masks == "" {
+				return fmt.Errorf("output %q: segmentation requires masks: <prototype tensor name>", name)
+			}
 		default:
-			return fmt.Errorf("output %q: unknown type %q (want classification, detection, embedding, or raw)", name, out.Type)
+			return fmt.Errorf("output %q: unknown type %q (want classification, detection, segmentation, embedding, or raw)", name, out.Type)
 		}
 		if out.Type == "detection" {
 			if out.Decoder == "" {

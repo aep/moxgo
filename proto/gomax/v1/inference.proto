@@ -150,6 +150,20 @@ message Detection {
   float y1 = 5;
   float x2 = 6;
   float y2 = 7;
+  // the object's pixels, for a segmentation model; unset otherwise
+  Mask mask = 8;
+}
+
+// Mask is a binary mask over a rectangle of the input image, in its pixels:
+// width×height bits from (x, y), row-major, packed eight to a byte with the
+// first pixel in the most significant bit. Rows are not padded to a byte.
+// Pixels outside the rectangle are not set.
+message Mask {
+  uint32 x = 1;
+  uint32 y = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  bytes bits = 5;
 }
 
 message Embedding {

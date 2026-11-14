@@ -1447,14 +1447,16 @@ func (x *Detections) GetItems() []*Detection {
 }
 
 type Detection struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
-	ClassId       int32                  `protobuf:"varint,2,opt,name=class_id,json=classId,proto3" json:"class_id,omitempty"`
-	Confidence    float32                `protobuf:"fixed32,3,opt,name=confidence,proto3" json:"confidence,omitempty"`
-	X1            float32                `protobuf:"fixed32,4,opt,name=x1,proto3" json:"x1,omitempty"`
-	Y1            float32                `protobuf:"fixed32,5,opt,name=y1,proto3" json:"y1,omitempty"`
-	X2            float32                `protobuf:"fixed32,6,opt,name=x2,proto3" json:"x2,omitempty"`
-	Y2            float32                `protobuf:"fixed32,7,opt,name=y2,proto3" json:"y2,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Label      string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	ClassId    int32                  `protobuf:"varint,2,opt,name=class_id,json=classId,proto3" json:"class_id,omitempty"`
+	Confidence float32                `protobuf:"fixed32,3,opt,name=confidence,proto3" json:"confidence,omitempty"`
+	X1         float32                `protobuf:"fixed32,4,opt,name=x1,proto3" json:"x1,omitempty"`
+	Y1         float32                `protobuf:"fixed32,5,opt,name=y1,proto3" json:"y1,omitempty"`
+	X2         float32                `protobuf:"fixed32,6,opt,name=x2,proto3" json:"x2,omitempty"`
+	Y2         float32                `protobuf:"fixed32,7,opt,name=y2,proto3" json:"y2,omitempty"`
+	// the object's pixels, for a segmentation model; unset otherwise
+	Mask          *Mask `protobuf:"bytes,8,opt,name=mask,proto3" json:"mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1538,6 +1540,93 @@ func (x *Detection) GetY2() float32 {
 	return 0
 }
 
+func (x *Detection) GetMask() *Mask {
+	if x != nil {
+		return x.Mask
+	}
+	return nil
+}
+
+// Mask is a binary mask over a rectangle of the input image, in its pixels:
+// width×height bits from (x, y), row-major, packed eight to a byte with the
+// first pixel in the most significant bit. Rows are not padded to a byte.
+// Pixels outside the rectangle are not set.
+type Mask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	X             uint32                 `protobuf:"varint,1,opt,name=x,proto3" json:"x,omitempty"`
+	Y             uint32                 `protobuf:"varint,2,opt,name=y,proto3" json:"y,omitempty"`
+	Width         uint32                 `protobuf:"varint,3,opt,name=width,proto3" json:"width,omitempty"`
+	Height        uint32                 `protobuf:"varint,4,opt,name=height,proto3" json:"height,omitempty"`
+	Bits          []byte                 `protobuf:"bytes,5,opt,name=bits,proto3" json:"bits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Mask) Reset() {
+	*x = Mask{}
+	mi := &file_gomax_v1_inference_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Mask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Mask) ProtoMessage() {}
+
+func (x *Mask) ProtoReflect() protoreflect.Message {
+	mi := &file_gomax_v1_inference_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Mask.ProtoReflect.Descriptor instead.
+func (*Mask) Descriptor() ([]byte, []int) {
+	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *Mask) GetX() uint32 {
+	if x != nil {
+		return x.X
+	}
+	return 0
+}
+
+func (x *Mask) GetY() uint32 {
+	if x != nil {
+		return x.Y
+	}
+	return 0
+}
+
+func (x *Mask) GetWidth() uint32 {
+	if x != nil {
+		return x.Width
+	}
+	return 0
+}
+
+func (x *Mask) GetHeight() uint32 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *Mask) GetBits() []byte {
+	if x != nil {
+		return x.Bits
+	}
+	return nil
+}
+
 type Embedding struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Values        []float32              `protobuf:"fixed32,1,rep,packed,name=values,proto3" json:"values,omitempty"`
@@ -1548,7 +1637,7 @@ type Embedding struct {
 
 func (x *Embedding) Reset() {
 	*x = Embedding{}
-	mi := &file_gomax_v1_inference_proto_msgTypes[27]
+	mi := &file_gomax_v1_inference_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1560,7 +1649,7 @@ func (x *Embedding) String() string {
 func (*Embedding) ProtoMessage() {}
 
 func (x *Embedding) ProtoReflect() protoreflect.Message {
-	mi := &file_gomax_v1_inference_proto_msgTypes[27]
+	mi := &file_gomax_v1_inference_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1573,7 +1662,7 @@ func (x *Embedding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Embedding.ProtoReflect.Descriptor instead.
 func (*Embedding) Descriptor() ([]byte, []int) {
-	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{27}
+	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *Embedding) GetValues() []float32 {
@@ -1600,7 +1689,7 @@ type PredictStreamRequest struct {
 
 func (x *PredictStreamRequest) Reset() {
 	*x = PredictStreamRequest{}
-	mi := &file_gomax_v1_inference_proto_msgTypes[28]
+	mi := &file_gomax_v1_inference_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1612,7 +1701,7 @@ func (x *PredictStreamRequest) String() string {
 func (*PredictStreamRequest) ProtoMessage() {}
 
 func (x *PredictStreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gomax_v1_inference_proto_msgTypes[28]
+	mi := &file_gomax_v1_inference_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1625,7 +1714,7 @@ func (x *PredictStreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PredictStreamRequest.ProtoReflect.Descriptor instead.
 func (*PredictStreamRequest) Descriptor() ([]byte, []int) {
-	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{28}
+	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PredictStreamRequest) GetModel() string {
@@ -1653,7 +1742,7 @@ type PredictStreamResponse struct {
 
 func (x *PredictStreamResponse) Reset() {
 	*x = PredictStreamResponse{}
-	mi := &file_gomax_v1_inference_proto_msgTypes[29]
+	mi := &file_gomax_v1_inference_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1665,7 +1754,7 @@ func (x *PredictStreamResponse) String() string {
 func (*PredictStreamResponse) ProtoMessage() {}
 
 func (x *PredictStreamResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gomax_v1_inference_proto_msgTypes[29]
+	mi := &file_gomax_v1_inference_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1678,7 +1767,7 @@ func (x *PredictStreamResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PredictStreamResponse.ProtoReflect.Descriptor instead.
 func (*PredictStreamResponse) Descriptor() ([]byte, []int) {
-	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{29}
+	return file_gomax_v1_inference_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *PredictStreamResponse) GetWindowStartSec() float64 {
@@ -1799,7 +1888,7 @@ const file_gomax_v1_inference_proto_rawDesc = "" +
 	"\x05score\x18\x03 \x01(\x02R\x05score\"7\n" +
 	"\n" +
 	"Detections\x12)\n" +
-	"\x05items\x18\x01 \x03(\v2\x13.gomax.v1.DetectionR\x05items\"\x9c\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x13.gomax.v1.DetectionR\x05items\"\xc0\x01\n" +
 	"\tDetection\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x19\n" +
 	"\bclass_id\x18\x02 \x01(\x05R\aclassId\x12\x1e\n" +
@@ -1809,7 +1898,14 @@ const file_gomax_v1_inference_proto_rawDesc = "" +
 	"\x02x1\x18\x04 \x01(\x02R\x02x1\x12\x0e\n" +
 	"\x02y1\x18\x05 \x01(\x02R\x02y1\x12\x0e\n" +
 	"\x02x2\x18\x06 \x01(\x02R\x02x2\x12\x0e\n" +
-	"\x02y2\x18\a \x01(\x02R\x02y2\"9\n" +
+	"\x02y2\x18\a \x01(\x02R\x02y2\x12\"\n" +
+	"\x04mask\x18\b \x01(\v2\x0e.gomax.v1.MaskR\x04mask\"d\n" +
+	"\x04Mask\x12\f\n" +
+	"\x01x\x18\x01 \x01(\rR\x01x\x12\f\n" +
+	"\x01y\x18\x02 \x01(\rR\x01y\x12\x14\n" +
+	"\x05width\x18\x03 \x01(\rR\x05width\x12\x16\n" +
+	"\x06height\x18\x04 \x01(\rR\x06height\x12\x12\n" +
+	"\x04bits\x18\x05 \x01(\fR\x04bits\"9\n" +
 	"\tEmbedding\x12\x16\n" +
 	"\x06values\x18\x01 \x03(\x02R\x06values\x12\x14\n" +
 	"\x05shape\x18\x02 \x03(\x03R\x05shape\"U\n" +
@@ -1843,7 +1939,7 @@ func file_gomax_v1_inference_proto_rawDescGZIP() []byte {
 	return file_gomax_v1_inference_proto_rawDescData
 }
 
-var file_gomax_v1_inference_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_gomax_v1_inference_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_gomax_v1_inference_proto_goTypes = []any{
 	(*InfoRequest)(nil),           // 0: gomax.v1.InfoRequest
 	(*InfoResponse)(nil),          // 1: gomax.v1.InfoResponse
@@ -1872,15 +1968,16 @@ var file_gomax_v1_inference_proto_goTypes = []any{
 	(*Classification)(nil),        // 24: gomax.v1.Classification
 	(*Detections)(nil),            // 25: gomax.v1.Detections
 	(*Detection)(nil),             // 26: gomax.v1.Detection
-	(*Embedding)(nil),             // 27: gomax.v1.Embedding
-	(*PredictStreamRequest)(nil),  // 28: gomax.v1.PredictStreamRequest
-	(*PredictStreamResponse)(nil), // 29: gomax.v1.PredictStreamResponse
-	nil,                           // 30: gomax.v1.ModelInput.ParamsEntry
+	(*Mask)(nil),                  // 27: gomax.v1.Mask
+	(*Embedding)(nil),             // 28: gomax.v1.Embedding
+	(*PredictStreamRequest)(nil),  // 29: gomax.v1.PredictStreamRequest
+	(*PredictStreamResponse)(nil), // 30: gomax.v1.PredictStreamResponse
+	nil,                           // 31: gomax.v1.ModelInput.ParamsEntry
 }
 var file_gomax_v1_inference_proto_depIdxs = []int32{
 	6,  // 0: gomax.v1.ListResponse.models:type_name -> gomax.v1.ModelInfo
 	7,  // 1: gomax.v1.ModelInfo.inputs:type_name -> gomax.v1.ModelInput
-	30, // 2: gomax.v1.ModelInput.params:type_name -> gomax.v1.ModelInput.ParamsEntry
+	31, // 2: gomax.v1.ModelInput.params:type_name -> gomax.v1.ModelInput.ParamsEntry
 	10, // 3: gomax.v1.PsResponse.models:type_name -> gomax.v1.RunningModel
 	18, // 4: gomax.v1.PredictRequest.inputs:type_name -> gomax.v1.Input
 	20, // 5: gomax.v1.Input.tensor:type_name -> gomax.v1.RawTensor
@@ -1888,35 +1985,36 @@ var file_gomax_v1_inference_proto_depIdxs = []int32{
 	22, // 7: gomax.v1.PredictResponse.outputs:type_name -> gomax.v1.OutputResult
 	23, // 8: gomax.v1.OutputResult.classifications:type_name -> gomax.v1.Classifications
 	25, // 9: gomax.v1.OutputResult.detections:type_name -> gomax.v1.Detections
-	27, // 10: gomax.v1.OutputResult.embedding:type_name -> gomax.v1.Embedding
+	28, // 10: gomax.v1.OutputResult.embedding:type_name -> gomax.v1.Embedding
 	20, // 11: gomax.v1.OutputResult.raw:type_name -> gomax.v1.RawTensor
 	24, // 12: gomax.v1.Classifications.items:type_name -> gomax.v1.Classification
 	26, // 13: gomax.v1.Detections.items:type_name -> gomax.v1.Detection
-	18, // 14: gomax.v1.PredictStreamRequest.inputs:type_name -> gomax.v1.Input
-	22, // 15: gomax.v1.PredictStreamResponse.outputs:type_name -> gomax.v1.OutputResult
-	0,  // 16: gomax.v1.InferenceService.Info:input_type -> gomax.v1.InfoRequest
-	2,  // 17: gomax.v1.InferenceService.ListProviders:input_type -> gomax.v1.ListProvidersRequest
-	4,  // 18: gomax.v1.InferenceService.List:input_type -> gomax.v1.ListRequest
-	8,  // 19: gomax.v1.InferenceService.Ps:input_type -> gomax.v1.PsRequest
-	11, // 20: gomax.v1.InferenceService.Pull:input_type -> gomax.v1.PullRequest
-	13, // 21: gomax.v1.InferenceService.Run:input_type -> gomax.v1.RunRequest
-	15, // 22: gomax.v1.InferenceService.Rm:input_type -> gomax.v1.RmRequest
-	17, // 23: gomax.v1.InferenceService.Predict:input_type -> gomax.v1.PredictRequest
-	28, // 24: gomax.v1.InferenceService.PredictStream:input_type -> gomax.v1.PredictStreamRequest
-	1,  // 25: gomax.v1.InferenceService.Info:output_type -> gomax.v1.InfoResponse
-	3,  // 26: gomax.v1.InferenceService.ListProviders:output_type -> gomax.v1.ListProvidersResponse
-	5,  // 27: gomax.v1.InferenceService.List:output_type -> gomax.v1.ListResponse
-	9,  // 28: gomax.v1.InferenceService.Ps:output_type -> gomax.v1.PsResponse
-	12, // 29: gomax.v1.InferenceService.Pull:output_type -> gomax.v1.PullEvent
-	14, // 30: gomax.v1.InferenceService.Run:output_type -> gomax.v1.RunResponse
-	16, // 31: gomax.v1.InferenceService.Rm:output_type -> gomax.v1.RmResponse
-	21, // 32: gomax.v1.InferenceService.Predict:output_type -> gomax.v1.PredictResponse
-	29, // 33: gomax.v1.InferenceService.PredictStream:output_type -> gomax.v1.PredictStreamResponse
-	25, // [25:34] is the sub-list for method output_type
-	16, // [16:25] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	27, // 14: gomax.v1.Detection.mask:type_name -> gomax.v1.Mask
+	18, // 15: gomax.v1.PredictStreamRequest.inputs:type_name -> gomax.v1.Input
+	22, // 16: gomax.v1.PredictStreamResponse.outputs:type_name -> gomax.v1.OutputResult
+	0,  // 17: gomax.v1.InferenceService.Info:input_type -> gomax.v1.InfoRequest
+	2,  // 18: gomax.v1.InferenceService.ListProviders:input_type -> gomax.v1.ListProvidersRequest
+	4,  // 19: gomax.v1.InferenceService.List:input_type -> gomax.v1.ListRequest
+	8,  // 20: gomax.v1.InferenceService.Ps:input_type -> gomax.v1.PsRequest
+	11, // 21: gomax.v1.InferenceService.Pull:input_type -> gomax.v1.PullRequest
+	13, // 22: gomax.v1.InferenceService.Run:input_type -> gomax.v1.RunRequest
+	15, // 23: gomax.v1.InferenceService.Rm:input_type -> gomax.v1.RmRequest
+	17, // 24: gomax.v1.InferenceService.Predict:input_type -> gomax.v1.PredictRequest
+	29, // 25: gomax.v1.InferenceService.PredictStream:input_type -> gomax.v1.PredictStreamRequest
+	1,  // 26: gomax.v1.InferenceService.Info:output_type -> gomax.v1.InfoResponse
+	3,  // 27: gomax.v1.InferenceService.ListProviders:output_type -> gomax.v1.ListProvidersResponse
+	5,  // 28: gomax.v1.InferenceService.List:output_type -> gomax.v1.ListResponse
+	9,  // 29: gomax.v1.InferenceService.Ps:output_type -> gomax.v1.PsResponse
+	12, // 30: gomax.v1.InferenceService.Pull:output_type -> gomax.v1.PullEvent
+	14, // 31: gomax.v1.InferenceService.Run:output_type -> gomax.v1.RunResponse
+	16, // 32: gomax.v1.InferenceService.Rm:output_type -> gomax.v1.RmResponse
+	21, // 33: gomax.v1.InferenceService.Predict:output_type -> gomax.v1.PredictResponse
+	30, // 34: gomax.v1.InferenceService.PredictStream:output_type -> gomax.v1.PredictStreamResponse
+	26, // [26:35] is the sub-list for method output_type
+	17, // [17:26] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_gomax_v1_inference_proto_init() }
@@ -1941,7 +2039,7 @@ func file_gomax_v1_inference_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gomax_v1_inference_proto_rawDesc), len(file_gomax_v1_inference_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

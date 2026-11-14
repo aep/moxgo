@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/jpeg"
+	"math/bits"
 	"os"
 	"os/signal"
 	"syscall"
@@ -323,8 +324,16 @@ func printOutputResult(out *gomaxv1.OutputResult) {
 		}
 	case *gomaxv1.OutputResult_Detections:
 		for _, d := range r.Detections.Items {
-			fmt.Printf("    %-20s %.1f%%  [%.0f, %.0f, %.0f, %.0f]\n",
-				d.Label, d.Confidence*100, d.X1, d.Y1, d.X2, d.Y2)
+			mask := ""
+			if m := d.Mask; m != nil {
+				n := 0
+				for _, b := range m.Bits {
+					n += bits.OnesCount8(b)
+				}
+				mask = fmt.Sprintf("  mask=%dx%d (%d px)", m.Width, m.Height, n)
+			}
+			fmt.Printf("    %-20s %.1f%%  [%.0f, %.0f, %.0f, %.0f]%s\n",
+				d.Label, d.Confidence*100, d.X1, d.Y1, d.X2, d.Y2, mask)
 		}
 	case *gomaxv1.OutputResult_Embedding:
 		fmt.Printf("    embedding: %d values\n", len(r.Embedding.Values))

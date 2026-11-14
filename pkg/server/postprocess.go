@@ -52,20 +52,23 @@ func ClassifyOutput(data []float32, lbls labels.Labels, topK int, sigmoid float6
 	return &gomaxv1.Classifications{Items: items}
 }
 
-// DetectOutput decodes YOLO-style [1, 4+C, N] output with NMS and coordinate mapping.
-func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
-	nClasses := int(shape[1]) - 4
+// yoloDet is a box decoded from YOLO output, in model-input pixels; anchor
+// is its column in the output.
+type yoloDet struct {
+	x1, y1, x2, y2 float32
+	classIdx       int
+	conf           float32
+	anchor         int
+}
+
+// yoloDecode decodes YOLO-style [1, 4+C(+M), N] output, the class scores
+// being the nClasses channels after the box, with NMS.
+func yoloDecode(data []float32, shape []int64, nClasses int) []yoloDet {
 	nDets := int(shape[2])
 	const confThreshold = 0.25
 	const iouThreshold = 0.45
 
-	type det struct {
-		x1, y1, x2, y2 float32
-		classIdx       int
-		conf           float32
-	}
-
-	var dets []det
+	var dets []yoloDet
 	for d := 0; d < nDets; d++ {
 		bestClass := 0
 		bestConf := data[4*nDets+d]
@@ -83,7 +86,7 @@ func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *
 		cy := data[1*nDets+d]
 		w := data[2*nDets+d]
 		h := data[3*nDets+d]
-		dets = append(dets, det{cx - w/2, cy - h/2, cx + w/2, cy + h/2, bestClass, bestConf})
+		dets = append(dets, yoloDet{cx - w/2, cy - h/2, cx + w/2, cy + h/2, bestClass, bestConf, d})
 	}
 
 	// Sort descending by confidence
@@ -112,28 +115,147 @@ func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *
 			}
 		}
 	}
-
-	items := make([]*gomaxv1.Detection, 0)
+	kept := dets[:0]
 	for i, d := range dets {
-		if !keep[i] {
-			continue
+		if keep[i] {
+			kept = append(kept, d)
 		}
-		label := ""
-		if lbls != nil {
-			label = lbls.Get(d.classIdx)
-		}
-		ox1 := (d.x1 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
-		oy1 := (d.y1 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
-		ox2 := (d.x2 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
-		oy2 := (d.y2 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
-		items = append(items, &gomaxv1.Detection{
-			Label:      label,
-			ClassId:    int32(d.classIdx),
-			Confidence: d.conf,
-			X1:         ox1, Y1: oy1, X2: ox2, Y2: oy2,
-		})
+	}
+	return kept
+}
+
+// yoloDetection maps d back to the original image.
+func yoloDetection(d yoloDet, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detection {
+	label := ""
+	if lbls != nil {
+		label = lbls.Get(d.classIdx)
+	}
+	ox1 := (d.x1 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
+	oy1 := (d.y1 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+	ox2 := (d.x2 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
+	oy2 := (d.y2 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+	return &gomaxv1.Detection{
+		Label:      label,
+		ClassId:    int32(d.classIdx),
+		Confidence: d.conf,
+		X1:         ox1, Y1: oy1, X2: ox2, Y2: oy2,
+	}
+}
+
+// DetectOutput decodes YOLO-style [1, 4+C, N] output with NMS and coordinate mapping.
+func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
+	nClasses := int(shape[1]) - 4
+	// A segmentation model (YOLO -seg) has its mask coefficients after the
+	// class scores: with fewer labels than channels, only the labels' are
+	// classes.
+	if n := len(lbls); n > 0 && n < nClasses {
+		nClasses = n
+	}
+	items := make([]*gomaxv1.Detection, 0)
+	for _, d := range yoloDecode(data, shape, nClasses) {
+		items = append(items, yoloDetection(d, lbls, imgTensor))
 	}
 	return &gomaxv1.Detections{Items: items}
+}
+
+// SegmentOutput decodes YOLO -seg output: data [1, 4+C+M, N] as for
+// DetectOutput, each detection's last M channels its coefficients for the
+// M mask prototypes protos [1, M, H, W] (H×W a quarter of the model input).
+// A detection's mask is sigmoid(coefficients · prototypes) > 0.5, upsampled
+// to the original image and cut to the detection's box.
+func SegmentOutput(data []float32, shape []int64, protos []float32, protoShape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
+	nm := int(protoShape[1])
+	ph, pw := int(protoShape[2]), int(protoShape[3])
+	nClasses := int(shape[1]) - 4 - nm
+	nDets := int(shape[2])
+	// Model-input pixels per prototype pixel.
+	sx := float32(imgTensor.Shape[3]) / float32(pw)
+	sy := float32(imgTensor.Shape[2]) / float32(ph)
+
+	items := make([]*gomaxv1.Detection, 0)
+	coef := make([]float32, nm)
+	for _, d := range yoloDecode(data, shape, nClasses) {
+		det := yoloDetection(d, lbls, imgTensor)
+		for k := range coef {
+			coef[k] = data[(4+nClasses+k)*nDets+d.anchor]
+		}
+		det.Mask = yoloMask(coef, protos, pw, ph, sx, sy, det, imgTensor)
+		items = append(items, det)
+	}
+	return &gomaxv1.Detections{Items: items}
+}
+
+// yoloMask is the mask of det, in original-image pixels over its box.
+func yoloMask(coef, protos []float32, pw, ph int, sx, sy float32, det *gomaxv1.Detection, imgTensor *goimage.Tensor) *gomaxv1.Mask {
+	// The box in original-image pixels, clamped to the image.
+	x0 := clampInt(int(math.Floor(float64(det.X1))), 0, imgTensor.SrcW)
+	y0 := clampInt(int(math.Floor(float64(det.Y1))), 0, imgTensor.SrcH)
+	x1 := clampInt(int(math.Ceil(float64(det.X2))), 0, imgTensor.SrcW)
+	y1 := clampInt(int(math.Ceil(float64(det.Y2))), 0, imgTensor.SrcH)
+	if x1 <= x0 || y1 <= y0 {
+		return nil
+	}
+	w, h := x1-x0, y1-y0
+	scale := float32(imgTensor.Scale)
+	padX, padY := float32(imgTensor.PadX), float32(imgTensor.PadY)
+	// protoXY is the prototype coordinate of an original-image pixel's
+	// center, prototype pixel centers being at integers.
+	protoX := func(x int) float32 { return ((float32(x)+0.5)*scale+padX)/sx - 0.5 }
+	protoY := func(y int) float32 { return ((float32(y)+0.5)*scale+padY)/sy - 0.5 }
+
+	// Mask logits over the prototype pixels under the box (and one around,
+	// to interpolate at its edge).
+	gx0 := clampInt(int(math.Floor(float64(protoX(x0)))), 0, pw-1)
+	gy0 := clampInt(int(math.Floor(float64(protoY(y0)))), 0, ph-1)
+	gx1 := clampInt(int(math.Floor(float64(protoX(x1-1))))+1, 0, pw-1)
+	gy1 := clampInt(int(math.Floor(float64(protoY(y1-1))))+1, 0, ph-1)
+	gw, gh := gx1-gx0+1, gy1-gy0+1
+	logits := make([]float32, gw*gh)
+	plane := pw * ph
+	for k, c := range coef {
+		p := protos[k*plane:]
+		for gy := 0; gy < gh; gy++ {
+			row := p[(gy0+gy)*pw+gx0:]
+			out := logits[gy*gw : (gy+1)*gw]
+			for gx := range out {
+				out[gx] += c * row[gx]
+			}
+		}
+	}
+	at := func(gx, gy int) float32 {
+		return logits[clampInt(gy-gy0, 0, gh-1)*gw+clampInt(gx-gx0, 0, gw-1)]
+	}
+
+	// Bilinear upsampling of the logits; sigmoid > 0.5 is logit > 0.
+	bits := make([]byte, (w*h+7)/8)
+	i := 0
+	for y := y0; y < y1; y++ {
+		fy := protoY(y)
+		iy := int(math.Floor(float64(fy)))
+		ty := fy - float32(iy)
+		for x := x0; x < x1; x++ {
+			fx := protoX(x)
+			ix := int(math.Floor(float64(fx)))
+			tx := fx - float32(ix)
+			top := at(ix, iy)*(1-tx) + at(ix+1, iy)*tx
+			bot := at(ix, iy+1)*(1-tx) + at(ix+1, iy+1)*tx
+			if top*(1-ty)+bot*ty > 0 {
+				bits[i>>3] |= 0x80 >> (i & 7)
+			}
+			i++
+		}
+	}
+	return &gomaxv1.Mask{X: uint32(x0), Y: uint32(y0), Width: uint32(w), Height: uint32(h), Bits: bits}
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // NormalizeCHW applies per-channel (x - mean) / std in-place on CHW [0,1] data.
@@ -157,8 +279,8 @@ func DetrDetectOutput(logits []float32, logitsShape []int64, boxes []float32, lb
 
 	type det struct {
 		x1, y1, x2, y2 float32
-		classIdx        int
-		conf            float32
+		classIdx       int
+		conf           float32
 	}
 
 	var imgW, imgH float32
