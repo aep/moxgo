@@ -33,9 +33,19 @@ func DetectFacts() Facts {
 	f := Facts{"os": runtime.GOOS, "arch": runtime.GOARCH}
 	switch runtime.GOOS {
 	case "android":
-		props := getprops()
+		var props map[string]string
 		for fact, prop := range androidProps {
-			if v := props[prop]; v != "" {
+			v := systemProperty(prop)
+			if v == "" {
+				// no libc access: getprop, which apps may not be able to run
+				if props == nil {
+					if props = getprops(); props == nil {
+						props = map[string]string{}
+					}
+				}
+				v = props[prop]
+			}
+			if v != "" {
 				f[fact] = v
 			}
 		}
