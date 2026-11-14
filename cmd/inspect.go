@@ -8,10 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var inspectLib string
-
 func init() {
-	inspectCmd.Flags().StringVar(&inspectLib, "lib", "", "path to libonnxruntime.so (auto-detect if empty)")
 	rootCmd.AddCommand(inspectCmd)
 }
 
@@ -22,8 +19,8 @@ var inspectCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var rt *onnx.Runtime
 		var err error
-		if inspectLib != "" {
-			rt, err = onnx.LoadFrom(inspectLib)
+		if libPath != "" {
+			rt, err = onnx.LoadFrom(libPath)
 		} else {
 			rt, err = onnx.Load()
 		}

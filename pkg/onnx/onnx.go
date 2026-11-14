@@ -8,17 +8,6 @@
 //   - Tensor data is passed by raw pointer (zero-copy); runtime.Pinner prevents GC interference
 package onnx
 
-/*
-#include <stdint.h>
-
-extern uintptr_t ort_vcall(uintptr_t fn,
-    uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
-    uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7);
-
-extern void ort_vcall_void(uintptr_t fn, uintptr_t a0);
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -173,16 +162,16 @@ type Runtime struct {
 }
 
 // vtable reads a function pointer from the OrtApi vtable at the given slot.
-func (rt *Runtime) vtable(slot int) C.uintptr_t { //nolint:govet
+func (rt *Runtime) vtable(slot int) uintptr { //nolint:govet
 	ptr := *(*uintptr)(unsafe.Pointer(rt.api + uintptr(slot)*unsafe.Sizeof(uintptr(0)))) //nolint:govet
-	return C.uintptr_t(ptr)
+	return uintptr(ptr)
 }
 
 // call invokes ORT API slot with args, checks OrtStatus* return.
 func (rt *Runtime) call(slot int, a0, a1, a2, a3, a4, a5, a6, a7 uintptr) error {
-	status := C.ort_vcall(rt.vtable(slot),
-		C.uintptr_t(a0), C.uintptr_t(a1), C.uintptr_t(a2), C.uintptr_t(a3),
-		C.uintptr_t(a4), C.uintptr_t(a5), C.uintptr_t(a6), C.uintptr_t(a7))
+	status := ortCall(rt.vtable(slot),
+		uintptr(a0), uintptr(a1), uintptr(a2), uintptr(a3),
+		uintptr(a4), uintptr(a5), uintptr(a6), uintptr(a7))
 	return rt.check(uintptr(status))
 }
 
@@ -191,7 +180,7 @@ func (rt *Runtime) release(slot int, ptr uintptr) {
 	if ptr == 0 {
 		return
 	}
-	C.ort_vcall_void(rt.vtable(slot), C.uintptr_t(ptr))
+	ortCallVoid(rt.vtable(slot), uintptr(ptr))
 }
 
 // check converts an OrtStatus* into a Go error.
@@ -201,11 +190,11 @@ func (rt *Runtime) check(status uintptr) error {
 		return nil
 	}
 	// GetErrorMessage(status) -> const char*
-	msgPtr := C.ort_vcall(rt.vtable(slotGetErrorMessage),
-		C.uintptr_t(status), 0, 0, 0, 0, 0, 0, 0)
+	msgPtr := ortCall(rt.vtable(slotGetErrorMessage),
+		uintptr(status), 0, 0, 0, 0, 0, 0, 0)
 	rt.lastError = goString(uintptr(msgPtr))
 	// ReleaseStatus(status)
-	C.ort_vcall_void(rt.vtable(slotReleaseStatus), C.uintptr_t(status))
+	ortCallVoid(rt.vtable(slotReleaseStatus), uintptr(status))
 	return fmt.Errorf("%w: %s", ErrOrt, rt.lastError)
 }
 

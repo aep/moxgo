@@ -11,22 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aep/moxgo/pkg/onnx"
-	"github.com/aep/moxgo/pkg/registry"
-	"github.com/aep/moxgo/pkg/server"
 	"github.com/spf13/cobra"
 )
 
-var (
-	serveConfig string
-	serveAddr   string
-	serveLib    string
-)
+var serveAddr string
 
 func init() {
-	serveCmd.Flags().StringVarP(&serveConfig, "config", "c", "moxgo.yaml", "model registry config file")
 	serveCmd.Flags().StringVar(&serveAddr, "addr", ":8080", "listen address")
-	serveCmd.Flags().StringVar(&serveLib, "lib", "", "path to libonnxruntime.so (auto-detect if empty)")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -37,17 +28,12 @@ var serveCmd = &cobra.Command{
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	var rt *onnx.Runtime
-	var err error
-	if serveLib != "" {
-		rt, err = onnx.LoadFrom(serveLib)
-	} else {
-		rt, err = onnx.Load()
-	}
+	srv, rt, err := newLocalServer()
 	if err != nil {
-		return fmt.Errorf("load ONNX Runtime: %w", err)
+		return err
 	}
 	defer rt.Close()
+	defer srv.Shutdown()
 
 	// Print ORT info
 	fmt.Printf("ONNX Runtime %s (api %d)\n", rt.VersionString(), rt.APIVersion)
@@ -58,55 +44,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  Providers: %s\n", strings.Join(short, ", "))
 
-	// Load registry from config file (if it exists)
-	var reg *server.Registry
-	if _, err := os.Stat(serveConfig); err == nil {
-		reg, err = server.LoadRegistry(serveConfig)
-		if err != nil {
-			return err
-		}
-	} else {
-		reg = server.NewRegistry()
-	}
-
-	// Auto-discover pulled models from ~/.moxgo/models/
-	if localModels, err := registry.ListLocal(); err == nil {
-		for _, m := range localModels {
-			if err := reg.Add(m); err != nil {
-				fmt.Fprintf(os.Stderr, "  warning: %v\n", err)
-			}
-		}
-	}
-
-	models := reg.List()
+	models := srv.Models()
 	fmt.Printf("  Models:    %d\n", len(models))
 	for _, m := range models {
 		fmt.Printf("    %-20s %s\n", m.Name, m.Path)
 	}
-
-	// Create server
-	pull := func(name string, progress func(string, int64, int64)) (*server.ModelConfig, error) {
-		cb := func(p registry.Progress) {
-			if progress != nil {
-				progress(p.File, p.Total, p.Downloaded)
-			}
-		}
-		if _, err := registry.Pull(registry.DefaultRegistry, name, cb); err != nil {
-			return nil, err
-		}
-		models, err := registry.ListLocal()
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range models {
-			if m.Name == name {
-				return m, nil
-			}
-		}
-		return nil, fmt.Errorf("model %q not found after pull", name)
-	}
-	srv := server.New(rt, reg, pull)
-	defer srv.Shutdown()
 
 	path, handler := srv.Handler()
 	mux := http.NewServeMux()

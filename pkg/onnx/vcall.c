@@ -1,3 +1,5 @@
+//go:build cgo
+
 #include <stdint.h>
 
 // ort_vcall calls a C function pointer with up to 8 pointer-sized args.

@@ -3,7 +3,9 @@ package server
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/aep/moxgo/pkg/labels"
 	"gopkg.in/yaml.v3"
@@ -18,8 +20,8 @@ type InputConfig struct {
 	Mean       []float32 `yaml:"mean" json:"mean,omitempty"`
 	Std        []float32 `yaml:"std" json:"std,omitempty"`
 	SampleRate int       `yaml:"sample_rate" json:"sample_rate,omitempty"`
-	Chunk      float64 `yaml:"chunk" json:"chunk,omitempty"`
-	Overlap    float64 `yaml:"overlap" json:"overlap,omitempty"`
+	Chunk      float64   `yaml:"chunk" json:"chunk,omitempty"`
+	Overlap    float64   `yaml:"overlap" json:"overlap,omitempty"`
 }
 
 func (ic *InputConfig) InputSize() int {
@@ -64,6 +66,7 @@ func (ic *InputConfig) ParamsMap() map[string]string {
 type OutputConfig struct {
 	Name           string        `yaml:"-" json:"-"`
 	Type           string        `yaml:"type" json:"type"`
+	Decoder        string        `yaml:"decoder" json:"decoder,omitempty"`
 	Labels         string        `yaml:"labels" json:"labels,omitempty"`
 	Sigmoid        float64       `yaml:"sigmoid" json:"sigmoid,omitempty"`
 	Boxes          string        `yaml:"boxes" json:"boxes,omitempty"`
@@ -88,8 +91,10 @@ type registryFile struct {
 	Models map[string]*ModelConfig `yaml:"models"`
 }
 
-// Registry holds validated model configurations.
+// Registry holds validated model configurations. Safe for concurrent use:
+// models can be added while the server runs.
 type Registry struct {
+	mu     sync.RWMutex
 	models map[string]*ModelConfig
 	order  []string
 }
@@ -98,11 +103,24 @@ func NewRegistry() *Registry {
 	return &Registry{models: make(map[string]*ModelConfig)}
 }
 
+// Add adds a model unless one of that name is already known.
 func (r *Registry) Add(cfg *ModelConfig) error {
-	if _, exists := r.models[cfg.Name]; exists {
+	r.mu.RLock()
+	_, exists := r.models[cfg.Name]
+	r.mu.RUnlock()
+	if exists {
 		return nil
 	}
+	return r.put(cfg, false)
+}
 
+// Replace adds a model, replacing one of the same name.
+func (r *Registry) Replace(cfg *ModelConfig) error {
+	return r.put(cfg, true)
+}
+
+func (r *Registry) put(cfg *ModelConfig, replace bool) error {
+	cfg.InputList, cfg.OutputList = nil, nil
 	for k, v := range cfg.Inputs {
 		v.Name = k
 		cfg.InputList = append(cfg.InputList, v)
@@ -126,8 +144,16 @@ func (r *Registry) Add(cfg *ModelConfig) error {
 		}
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.models[cfg.Name]; exists {
+		if !replace {
+			return nil
+		}
+	} else {
+		r.order = append(r.order, cfg.Name)
+	}
 	r.models[cfg.Name] = cfg
-	r.order = append(r.order, cfg.Name)
 	return nil
 }
 
@@ -143,12 +169,19 @@ func LoadRegistry(path string) (*Registry, error) {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
 	}
 
+	// Relative model paths are resolved against the config file's directory,
+	// not the current working directory.
+	baseDir := filepath.Dir(path)
+
 	reg := &Registry{
 		models: make(map[string]*ModelConfig, len(rf.Models)),
 	}
 
 	for name, cfg := range rf.Models {
 		cfg.Name = name
+		if cfg.Path != "" && !filepath.IsAbs(cfg.Path) {
+			cfg.Path = filepath.Join(baseDir, cfg.Path)
+		}
 
 		// Set names from map keys and build ordered lists
 		for k, v := range cfg.Inputs {
@@ -182,11 +215,15 @@ func LoadRegistry(path string) (*Registry, error) {
 }
 
 func (r *Registry) Get(name string) (*ModelConfig, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	m, ok := r.models[name]
 	return m, ok
 }
 
 func (r *Registry) List() []*ModelConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]*ModelConfig, len(r.order))
 	for i, name := range r.order {
 		out[i] = r.models[name]
@@ -227,6 +264,26 @@ func validateModel(cfg *ModelConfig) error {
 		case "classification", "detection", "embedding", "raw":
 		default:
 			return fmt.Errorf("output %q: unknown type %q (want classification, detection, embedding, or raw)", name, out.Type)
+		}
+		if out.Type == "detection" {
+			if out.Decoder == "" {
+				// Back-compat: infer the decoder from whether a separate box
+				// tensor was named (DETR), otherwise assume packed YOLO output.
+				if out.Boxes != "" {
+					out.Decoder = "detr"
+				} else {
+					out.Decoder = "yolo"
+				}
+			}
+			switch out.Decoder {
+			case "yolo":
+			case "detr", "ov":
+				if out.Boxes == "" {
+					return fmt.Errorf("output %q: decoder %q requires boxes: <tensor name>", name, out.Decoder)
+				}
+			default:
+				return fmt.Errorf("output %q: unknown decoder %q (want yolo, detr, or ov)", name, out.Decoder)
+			}
 		}
 	}
 	return nil

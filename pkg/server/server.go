@@ -87,11 +87,21 @@ func (s *Server) Ps(_ context.Context, _ *connect.Request[gomaxv1.PsRequest]) (*
 	return connect.NewResponse(resp), nil
 }
 
-func (s *Server) Pull(_ context.Context, req *connect.Request[gomaxv1.PullRequest], stream *connect.ServerStream[gomaxv1.PullEvent]) error {
+// PullModel downloads a model and registers it, reporting download progress.
+// It is the shared core used by both the connect handler and local sessions.
+func (s *Server) PullModel(model string, progress func(file string, total, downloaded int64)) error {
 	if s.pull == nil {
-		return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("pull not configured"))
+		return fmt.Errorf("pull not configured")
 	}
-	cfg, err := s.pull(req.Msg.Model, func(file string, total, downloaded int64) {
+	cfg, err := s.pull(model, progress)
+	if err != nil {
+		return err
+	}
+	return s.mgr.registry.Add(cfg)
+}
+
+func (s *Server) Pull(_ context.Context, req *connect.Request[gomaxv1.PullRequest], stream *connect.ServerStream[gomaxv1.PullEvent]) error {
+	err := s.PullModel(req.Msg.Model, func(file string, total, downloaded int64) {
 		_ = stream.Send(&gomaxv1.PullEvent{
 			File:       file,
 			Total:      total,
@@ -99,9 +109,6 @@ func (s *Server) Pull(_ context.Context, req *connect.Request[gomaxv1.PullReques
 		})
 	})
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
-	}
-	if err := s.mgr.registry.Add(cfg); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	return stream.Send(&gomaxv1.PullEvent{Done: true})
@@ -154,11 +161,30 @@ func (s *Server) Manager() *InstanceManager {
 	return s.mgr
 }
 
+// Models returns all models known to the registry.
+func (s *Server) Models() []*ModelConfig {
+	return s.mgr.registry.List()
+}
+
 // Preload loads a model by name so it's ready for inference.
 func (s *Server) Preload(name string) error {
 	_, err := s.mgr.Run(name, "")
 	if err != nil {
 		return fmt.Errorf("preload %s: %w", name, err)
+	}
+	return nil
+}
+
+// AddModel makes a model available, replacing one of the same name. A
+// running instance of the replaced model is stopped, so the next request
+// loads the new one.
+func (s *Server) AddModel(cfg *ModelConfig) error {
+	_, existed := s.mgr.registry.Get(cfg.Name)
+	if err := s.mgr.registry.Replace(cfg); err != nil {
+		return err
+	}
+	if existed {
+		_ = s.mgr.Rm(cfg.Name)
 	}
 	return nil
 }

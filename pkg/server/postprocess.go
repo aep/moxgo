@@ -256,6 +256,107 @@ func DetrDetectOutput(logits []float32, logitsShape []int64, boxes []float32, lb
 	return &gomaxv1.Detections{Items: items}
 }
 
+// OvDetrDetectOutput decodes open-vocabulary DETR output: per-class queries with
+// independent scores. Expects scores shape [C, Q, 1] (one sigmoid logit per
+// (class, query) pair) and boxes shape [C, Q, 4] (normalized [cx,cy,w,h]).
+// Unlike DetrDetectOutput, the class index is the outer dim — not an argmax across
+// a class axis — so each class predicts its own boxes independently.
+func OvDetrDetectOutput(scores []float32, scoresShape []int64, boxes []float32, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
+	numClasses := int(scoresShape[0])
+	numQueries := int(scoresShape[1])
+	const confThreshold = 0.35
+	const iouThreshold = 0.7
+
+	var imgW, imgH float32
+	if imgTensor != nil {
+		imgW = float32(imgTensor.Shape[3])
+		imgH = float32(imgTensor.Shape[2])
+	} else {
+		imgW, imgH = 1, 1
+	}
+
+	type det struct {
+		x1, y1, x2, y2 float32
+		classIdx       int
+		conf           float32
+	}
+
+	var dets []det
+	for c := 0; c < numClasses; c++ {
+		for q := 0; q < numQueries; q++ {
+			conf := sigmoid32(scores[c*numQueries+q])
+			if conf < confThreshold {
+				continue
+			}
+			bbase := (c*numQueries + q) * 4
+			cx := boxes[bbase+0]
+			cy := boxes[bbase+1]
+			w := boxes[bbase+2]
+			h := boxes[bbase+3]
+			dets = append(dets, det{
+				x1:       (cx - w/2) * imgW,
+				y1:       (cy - h/2) * imgH,
+				x2:       (cx + w/2) * imgW,
+				y2:       (cy + h/2) * imgH,
+				classIdx: c,
+				conf:     conf,
+			})
+		}
+	}
+
+	// Sort descending by confidence.
+	for i := 1; i < len(dets); i++ {
+		for j := i; j > 0 && dets[j].conf > dets[j-1].conf; j-- {
+			dets[j], dets[j-1] = dets[j-1], dets[j]
+		}
+	}
+
+	// NMS per class.
+	keep := make([]bool, len(dets))
+	for i := range keep {
+		keep[i] = true
+	}
+	for i := 0; i < len(dets); i++ {
+		if !keep[i] {
+			continue
+		}
+		for j := i + 1; j < len(dets); j++ {
+			if !keep[j] || dets[j].classIdx != dets[i].classIdx {
+				continue
+			}
+			if bboxIoU(dets[i].x1, dets[i].y1, dets[i].x2, dets[i].y2,
+				dets[j].x1, dets[j].y1, dets[j].x2, dets[j].y2) > iouThreshold {
+				keep[j] = false
+			}
+		}
+	}
+
+	items := make([]*gomaxv1.Detection, 0)
+	for i, d := range dets {
+		if !keep[i] {
+			continue
+		}
+		label := ""
+		if lbls != nil {
+			label = lbls.Get(d.classIdx)
+		}
+		ox1, oy1, ox2, oy2 := d.x1, d.y1, d.x2, d.y2
+		if imgTensor != nil {
+			ox1 = (d.x1 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
+			oy1 = (d.y1 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+			ox2 = (d.x2 - float32(imgTensor.PadX)) / float32(imgTensor.Scale)
+			oy2 = (d.y2 - float32(imgTensor.PadY)) / float32(imgTensor.Scale)
+		}
+		items = append(items, &gomaxv1.Detection{
+			Label:      label,
+			ClassId:    int32(d.classIdx),
+			Confidence: d.conf,
+			X1:         ox1, Y1: oy1, X2: ox2, Y2: oy2,
+		})
+	}
+	return &gomaxv1.Detections{Items: items}
+}
+
 // EmbeddingOutput wraps raw output as an Embedding proto.
 func EmbeddingOutput(data []float32, shape []int64) *gomaxv1.Embedding {
 	values := make([]float32, len(data))

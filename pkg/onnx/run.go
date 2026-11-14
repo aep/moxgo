@@ -1,14 +1,5 @@
 package onnx
 
-/*
-#include <stdint.h>
-extern uintptr_t ort_vcall(uintptr_t fn,
-    uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
-    uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7);
-extern void ort_vcall_void(uintptr_t fn, uintptr_t a0);
-*/
-import "C"
-
 import (
 	"fmt"
 	"runtime"
@@ -44,12 +35,18 @@ func (r *Run) Bind(name string, dataPtr unsafe.Pointer, dataLen int, dtype ElemT
 	rt := r.sess.rt
 	nameC := cstring(name)
 
+	// A rank-0 (scalar) tensor has an empty shape; pass a nil dims pointer.
+	var shapePtr unsafe.Pointer
+	if len(shape) > 0 {
+		shapePtr = unsafe.Pointer(&shape[0])
+	}
+
 	var value uintptr
 	if err := rt.call(slotCreateTensorWithDataAsOrtValue,
 		r.sess.memInfo,
 		uintptr(dataPtr),
 		uintptr(dataLen),
-		uintptr(unsafe.Pointer(&shape[0])),
+		uintptr(shapePtr),
 		uintptr(len(shape)),
 		uintptr(dtype),
 		uintptr(unsafe.Pointer(&value)),
@@ -79,6 +76,17 @@ func BindSlice[T TensorElem](r *Run, name string, data []T, shape []int64) error
 		elemTypeOf[T](),
 		shape,
 	)
+}
+
+// BindBool binds a []bool as an ONNX bool tensor (zero-copy). bool is not part
+// of the TensorElem numeric constraint, so it needs its own helper. A bool is
+// one byte, matching ONNX's bool element type. Pass an empty shape for a scalar.
+func BindBool(r *Run, name string, data []bool, shape []int64) error {
+	if len(data) == 0 {
+		return fmt.Errorf("onnx: empty input data for %q", name)
+	}
+	r.pinner.Pin(&data[0])
+	return r.Bind(name, unsafe.Pointer(&data[0]), len(data), ElemTypeBool, shape)
 }
 
 // prepare builds cached pointer arrays on first call.
@@ -123,7 +131,7 @@ func (r *Run) Exec() error {
 	// Release prior output OrtValues
 	for i, v := range r.outValues {
 		if v != 0 {
-			C.ort_vcall_void(sess.fnReleaseValue, C.uintptr_t(v))
+			ortCallVoid(sess.fnReleaseValue, uintptr(v))
 			r.outValues[i] = 0
 		}
 	}
@@ -139,15 +147,15 @@ func (r *Run) Exec() error {
 		outValsPtr = uintptr(unsafe.Pointer(&r.outValues[0]))
 	}
 
-	status := C.ort_vcall(sess.fnRun,
-		C.uintptr_t(sess.sess),
+	status := ortCall(sess.fnRun,
+		uintptr(sess.sess),
 		0, // RunOptions
-		C.uintptr_t(inNamesPtr),
-		C.uintptr_t(inValsPtr),
-		C.uintptr_t(len(r.inputValues)),
-		C.uintptr_t(outNamesPtr),
-		C.uintptr_t(nOut),
-		C.uintptr_t(outValsPtr),
+		uintptr(inNamesPtr),
+		uintptr(inValsPtr),
+		uintptr(len(r.inputValues)),
+		uintptr(outNamesPtr),
+		uintptr(nOut),
+		uintptr(outValsPtr),
 	)
 
 	runtime.KeepAlive(r.inNamePtrs)
@@ -183,8 +191,8 @@ func (r *Run) GetOutput(index int) (*Output, error) {
 
 	// GetTensorTypeAndShape
 	var info uintptr
-	status := C.ort_vcall(sess.fnGetTensorTypeAndShape,
-		C.uintptr_t(v), C.uintptr_t(uintptr(unsafe.Pointer(&info))),
+	status := ortCall(sess.fnGetTensorTypeAndShape,
+		uintptr(v), uintptr(uintptr(unsafe.Pointer(&info))),
 		0, 0, 0, 0, 0, 0)
 	if err := sess.rt.check(uintptr(status)); err != nil {
 		return nil, err
@@ -192,15 +200,15 @@ func (r *Run) GetOutput(index int) (*Output, error) {
 
 	// GetTensorElementType
 	var dtype int32
-	C.ort_vcall(sess.fnGetTensorElementType,
-		C.uintptr_t(info), C.uintptr_t(uintptr(unsafe.Pointer(&dtype))),
+	ortCall(sess.fnGetTensorElementType,
+		uintptr(info), uintptr(uintptr(unsafe.Pointer(&dtype))),
 		0, 0, 0, 0, 0, 0)
 	out.Dtype = ElemType(dtype)
 
 	// GetDimensionsCount
 	var ndims uintptr
-	C.ort_vcall(sess.fnGetDimensionsCount,
-		C.uintptr_t(info), C.uintptr_t(uintptr(unsafe.Pointer(&ndims))),
+	ortCall(sess.fnGetDimensionsCount,
+		uintptr(info), uintptr(uintptr(unsafe.Pointer(&ndims))),
 		0, 0, 0, 0, 0, 0)
 
 	// GetDimensions — reuse pre-allocated shape buffer
@@ -210,12 +218,12 @@ func (r *Run) GetOutput(index int) (*Output, error) {
 		out.Shape = out.Shape[:ndims]
 	}
 	if ndims > 0 {
-		C.ort_vcall(sess.fnGetDimensions,
-			C.uintptr_t(info), C.uintptr_t(uintptr(unsafe.Pointer(&out.Shape[0]))), C.uintptr_t(ndims),
+		ortCall(sess.fnGetDimensions,
+			uintptr(info), uintptr(uintptr(unsafe.Pointer(&out.Shape[0]))), uintptr(ndims),
 			0, 0, 0, 0, 0)
 	}
 
-	C.ort_vcall_void(sess.fnReleaseTensorTypeAndShape, C.uintptr_t(info))
+	ortCallVoid(sess.fnReleaseTensorTypeAndShape, uintptr(info))
 
 	nElems := 1
 	for _, d := range out.Shape {
@@ -225,8 +233,8 @@ func (r *Run) GetOutput(index int) (*Output, error) {
 
 	// GetTensorMutableData
 	var dataPtr uintptr
-	status = C.ort_vcall(sess.fnGetTensorMutableData,
-		C.uintptr_t(v), C.uintptr_t(uintptr(unsafe.Pointer(&dataPtr))),
+	status = ortCall(sess.fnGetTensorMutableData,
+		uintptr(v), uintptr(uintptr(unsafe.Pointer(&dataPtr))),
 		0, 0, 0, 0, 0, 0)
 	if err := sess.rt.check(uintptr(status)); err != nil {
 		return nil, err
@@ -264,12 +272,12 @@ func (r *Run) Close() {
 	sess := r.sess
 	for _, v := range r.inputValues {
 		if v != 0 {
-			C.ort_vcall_void(sess.fnReleaseValue, C.uintptr_t(v))
+			ortCallVoid(sess.fnReleaseValue, uintptr(v))
 		}
 	}
 	for _, v := range r.outValues {
 		if v != 0 {
-			C.ort_vcall_void(sess.fnReleaseValue, C.uintptr_t(v))
+			ortCallVoid(sess.fnReleaseValue, uintptr(v))
 		}
 	}
 	r.pinner.Unpin()

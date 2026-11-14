@@ -427,19 +427,26 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 
 	switch oc.Type {
 	case "detection":
-		if oc.Boxes != "" {
+		switch oc.Decoder {
+		case "detr", "ov":
+			// Both decoders read a separate normalized-box tensor named by oc.Boxes.
 			boxes, err := slot.run.GetOutputByName(oc.Boxes)
-			if err == nil && boxes.Dtype == onnx.ElemTypeFloat32 && boxes.Len > 0 {
-				or.Result = &gomaxv1.OutputResult_Detections{
-					Detections: DetrDetectOutput(data, result.Shape,
-						unsafe.Slice((*float32)(boxes.Ptr), boxes.Len),
-						oc.ResolvedLabels, imgTensor),
-				}
+			if err != nil || boxes.Dtype != onnx.ElemTypeFloat32 || boxes.Len == 0 {
+				or.Result = &gomaxv1.OutputResult_Raw{Raw: RawOutput(data, result.Shape)}
 				break
 			}
-		}
-		or.Result = &gomaxv1.OutputResult_Detections{
-			Detections: DetectOutput(data, result.Shape, oc.ResolvedLabels, imgTensor),
+			bdata := unsafe.Slice((*float32)(boxes.Ptr), boxes.Len)
+			var dets *gomaxv1.Detections
+			if oc.Decoder == "ov" {
+				dets = OvDetrDetectOutput(data, result.Shape, bdata, oc.ResolvedLabels, imgTensor)
+			} else {
+				dets = DetrDetectOutput(data, result.Shape, bdata, oc.ResolvedLabels, imgTensor)
+			}
+			or.Result = &gomaxv1.OutputResult_Detections{Detections: dets}
+		default: // "yolo" — boxes are packed inline in the single output tensor.
+			or.Result = &gomaxv1.OutputResult_Detections{
+				Detections: DetectOutput(data, result.Shape, oc.ResolvedLabels, imgTensor),
+			}
 		}
 	case "classification":
 		or.Result = &gomaxv1.OutputResult_Classifications{

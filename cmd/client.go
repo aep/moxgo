@@ -1,13 +1,19 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image/jpeg"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"connectrpc.com/connect"
 
+	"github.com/aep/moxgo/pkg/camera"
 	gomaxv1 "github.com/aep/moxgo/pkg/proto/gomax/v1"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +25,10 @@ var (
 	runInputName string
 	runJSON      bool
 	runEP        string
+	runCamera    bool
+	runCameraID  int
+	runFPS       float64
+	runStream    string
 )
 
 func init() {
@@ -26,6 +36,10 @@ func init() {
 	runCmd.Flags().StringVarP(&runInputName, "input", "n", "", "input name (optional if single input)")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "output raw JSON")
 	runCmd.Flags().StringVar(&runEP, "ep", "", "execution provider (e.g. CUDA, CoreML)")
+	runCmd.Flags().BoolVar(&runCamera, "camera", false, "capture from camera instead of file")
+	runCmd.Flags().IntVar(&runCameraID, "camera-id", 0, "camera device index")
+	runCmd.Flags().Float64Var(&runFPS, "fps", 1, "frames per second for camera/stream capture")
+	runCmd.Flags().StringVar(&runStream, "stream", "", "video stream URL (http:// for MJPEG, rtsp:// for RTSP)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -34,7 +48,24 @@ var runCmd = &cobra.Command{
 	Short: "Load a model and optionally run inference",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := newClient()
+		nSources := 0
+		if runFile != "" {
+			nSources++
+		}
+		if runCamera {
+			nSources++
+		}
+		if runStream != "" {
+			nSources++
+		}
+		if nSources > 1 {
+			return fmt.Errorf("--file, --camera, and --stream are mutually exclusive")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
 		model := args[0]
 
 		resp, err := c.Run(context.Background(),
@@ -43,6 +74,13 @@ var runCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("%s (ep=%s)\n", resp.Msg.Model, resp.Msg.Ep)
+
+		if runCamera {
+			return runCameraLoop(c, model)
+		}
+		if runStream != "" {
+			return runStreamLoop(c, model)
+		}
 
 		if runFile == "" {
 			return nil
@@ -75,7 +113,11 @@ var psCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "List running models",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := newClient().Ps(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		resp, err := c.Ps(context.Background(),
 			connect.NewRequest(&gomaxv1.PsRequest{}))
 		if err != nil {
 			return err
@@ -100,7 +142,11 @@ var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List available models",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := newClient().List(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		resp, err := c.List(context.Background(),
 			connect.NewRequest(&gomaxv1.ListRequest{}))
 		if err != nil {
 			return err
@@ -126,7 +172,11 @@ var rmCmd = &cobra.Command{
 	Short: "Unload a running model",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := newClient().Rm(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		_, err = c.Rm(context.Background(),
 			connect.NewRequest(&gomaxv1.RmRequest{Model: args[0]}))
 		if err != nil {
 			return err
@@ -161,7 +211,11 @@ var predictCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		resp, err := newClient().Predict(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		resp, err := c.Predict(context.Background(),
 			connect.NewRequest(&gomaxv1.PredictRequest{
 				Model:  args[0],
 				Inputs: newInput(predictInputName, data),
@@ -199,7 +253,11 @@ var streamCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		stream, err := newClient().PredictStream(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		stream, err := c.PredictStream(context.Background(),
 			connect.NewRequest(&gomaxv1.PredictStreamRequest{
 				Model:  args[0],
 				Inputs: newInput(streamInputName, data),
@@ -226,7 +284,11 @@ var providersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List execution providers",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resp, err := newClient().ListProviders(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		resp, err := c.ListProviders(context.Background(),
 			connect.NewRequest(&gomaxv1.ListProvidersRequest{}))
 		if err != nil {
 			return err
@@ -271,4 +333,104 @@ func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// --- cameras ---
+
+func init() { rootCmd.AddCommand(camerasCmd) }
+
+var camerasCmd = &cobra.Command{
+	Use:   "cameras",
+	Short: "List available cameras",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		devices, err := camera.List()
+		if err != nil {
+			return err
+		}
+		if len(devices) == 0 {
+			fmt.Println("No cameras found.")
+			return nil
+		}
+		fmt.Printf("%-5s %s\n", "ID", "NAME")
+		for _, d := range devices {
+			fmt.Printf("%-5d %s\n", d.Index, d.Name)
+		}
+		return nil
+	},
+}
+
+// --- capture loops ---
+
+func runVideoLoop(c backend, model string, cam camera.Camera) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ticker := time.NewTicker(time.Duration(float64(time.Second) / runFPS))
+	defer ticker.Stop()
+
+	frame := 0
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nStopped.")
+			return nil
+		case <-ticker.C:
+			img, err := cam.NextFrame()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "frame error: %v\n", err)
+				continue
+			}
+
+			var buf bytes.Buffer
+			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+				fmt.Fprintf(os.Stderr, "encode error: %v\n", err)
+				continue
+			}
+
+			pred, err := c.Predict(context.Background(),
+				connect.NewRequest(&gomaxv1.PredictRequest{
+					Model:  model,
+					Inputs: newInput(runInputName, buf.Bytes()),
+				}))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "predict error: %v\n", err)
+				continue
+			}
+
+			frame++
+			fmt.Printf("\n--- Frame %d ---\n", frame)
+			if runJSON {
+				printJSON(pred.Msg)
+			} else {
+				printPredictResponse(pred.Msg)
+			}
+		}
+	}
+}
+
+func runStreamLoop(c backend, model string) error {
+	fmt.Printf("Stream: %s\n", runStream)
+	cam, err := camera.OpenStream(runStream)
+	if err != nil {
+		return err
+	}
+	defer cam.Close()
+	fmt.Printf("Capturing at %.1f fps (Ctrl+C to stop)\n", runFPS)
+	return runVideoLoop(c, model, cam)
+}
+
+func runCameraLoop(c backend, model string) error {
+	devices, _ := camera.List()
+	if runCameraID < len(devices) {
+		fmt.Printf("Camera: [%d] %s\n", devices[runCameraID].Index, devices[runCameraID].Name)
+	}
+
+	cam, err := camera.Open(runCameraID)
+	if err != nil {
+		return err
+	}
+	defer cam.Close()
+
+	fmt.Printf("Capturing at %.1f fps (Ctrl+C to stop)\n", runFPS)
+	return runVideoLoop(c, model, cam)
 }

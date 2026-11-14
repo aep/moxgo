@@ -9,6 +9,7 @@ models:
     outputs:
       output0:
         type: detection
+        decoder: yolo
         labels: coco80
 
   rf-detr-large:
@@ -23,6 +24,7 @@ models:
     outputs:
       logits:
         type: detection
+        decoder: detr
         boxes: pred_boxes
         labels: coco91
 

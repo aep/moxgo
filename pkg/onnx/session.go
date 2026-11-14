@@ -1,17 +1,10 @@
 package onnx
 
-/*
-#include <stdint.h>
-extern uintptr_t ort_vcall(uintptr_t fn,
-    uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
-    uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7);
-*/
-import "C"
-
 import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync"
 	"unsafe"
 )
 
@@ -58,14 +51,14 @@ type Session struct {
 	EPErrors  []EPError
 
 	// Pre-resolved hot-path function pointers (read once from vtable).
-	fnRun                       C.uintptr_t
-	fnReleaseValue              C.uintptr_t
-	fnGetTensorTypeAndShape     C.uintptr_t
-	fnReleaseTensorTypeAndShape C.uintptr_t
-	fnGetTensorElementType      C.uintptr_t
-	fnGetDimensionsCount        C.uintptr_t
-	fnGetDimensions             C.uintptr_t
-	fnGetTensorMutableData      C.uintptr_t
+	fnRun                       uintptr
+	fnReleaseValue              uintptr
+	fnGetTensorTypeAndShape     uintptr
+	fnReleaseTensorTypeAndShape uintptr
+	fnGetTensorElementType      uintptr
+	fnGetDimensionsCount        uintptr
+	fnGetDimensions             uintptr
+	fnGetTensorMutableData      uintptr
 }
 
 // OpenSession loads a model from path with default options.
@@ -231,8 +224,17 @@ func (s *Session) appendEP(ep ExecutionProvider) error {
 	return s.appendEPGeneric(ep)
 }
 
+// Some onnxruntime builds (e.g. Arch's onnxruntime-opt-cuda) ship
+// libonnxruntime_providers_cuda.so without a NEEDED entry for libcudnn, so
+// dlopen of the provider fails with undefined cudnn* symbols. Preloading
+// cuDNN globally papers over that.
+var preloadCudnnOnce sync.Once
+
 // appendEPStandalone calls OrtSessionOptionsAppendExecutionProvider_CUDA(opts, device_id).
 func (s *Session) appendEPStandalone(symbol string, ep ExecutionProvider) error {
+	if symbol != "OrtSessionOptionsAppendExecutionProvider_Nnapi" {
+		preloadCudnnOnce.Do(func() { dlPreloadGlobal("libcudnn.so.9", "libcudnn.so") })
+	}
 	fn, err := dlSym(s.rt.lib, symbol)
 	if err != nil {
 		return fmt.Errorf("dlsym %s: %w", symbol, err)
@@ -241,8 +243,8 @@ func (s *Session) appendEPStandalone(symbol string, ep ExecutionProvider) error 
 	if v, ok := ep.Options["device_id"]; ok {
 		deviceID, _ = strconv.Atoi(v)
 	}
-	status := C.ort_vcall(C.uintptr_t(fn),
-		C.uintptr_t(s.opts), C.uintptr_t(deviceID), 0, 0, 0, 0, 0, 0)
+	status := ortCall(uintptr(fn),
+		uintptr(s.opts), uintptr(deviceID), 0, 0, 0, 0, 0, 0)
 	return s.rt.check(uintptr(status))
 }
 
@@ -438,10 +440,10 @@ func (s *Session) fetchCustomMeta(mm uintptr, key string) string {
 	rt := s.rt
 	keyC := cstring(key)
 	var valPtr uintptr
-	status := C.ort_vcall(rt.vtable(slotModelMetadataLookupCustomMetadataMap),
-		C.uintptr_t(mm), C.uintptr_t(s.allocator),
-		C.uintptr_t(uintptr(unsafe.Pointer(&keyC[0]))),
-		C.uintptr_t(uintptr(unsafe.Pointer(&valPtr))),
+	status := ortCall(rt.vtable(slotModelMetadataLookupCustomMetadataMap),
+		uintptr(mm), uintptr(s.allocator),
+		uintptr(uintptr(unsafe.Pointer(&keyC[0]))),
+		uintptr(uintptr(unsafe.Pointer(&valPtr))),
 		0, 0, 0, 0)
 	runtime.KeepAlive(keyC)
 	if uintptr(status) != 0 {
@@ -459,8 +461,8 @@ func (s *Session) fetchCustomMeta(mm uintptr, key string) string {
 func (s *Session) fetchMetaString(mm uintptr, slot int) string {
 	rt := s.rt
 	var strPtr uintptr
-	status := C.ort_vcall(rt.vtable(slot),
-		C.uintptr_t(mm), C.uintptr_t(s.allocator), C.uintptr_t(uintptr(unsafe.Pointer(&strPtr))),
+	status := ortCall(rt.vtable(slot),
+		uintptr(mm), uintptr(s.allocator), uintptr(uintptr(unsafe.Pointer(&strPtr))),
 		0, 0, 0, 0, 0)
 	if uintptr(status) != 0 {
 		_ = rt.check(uintptr(status))

@@ -21,7 +21,11 @@ var versionCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Printf("client: %s\n", version.Version)
 
-		client := newClient()
+		client, err := newClient()
+		if err != nil {
+			fmt.Printf("server: unavailable\n")
+			return nil
+		}
 		resp, err := client.Info(context.Background(), connect.NewRequest(&gomaxv1.InfoRequest{}))
 		if err != nil {
 			fmt.Printf("server: unavailable\n")

@@ -152,7 +152,7 @@ func TestZeroAllocExec(t *testing.T) {
 	})
 
 	fmt.Printf("Allocations per Exec+GetOutput: %.1f\n", allocs)
-	if allocs > 0 {
+	if allocs > 0 && onnx.ZeroAllocCalls {
 		t.Fatalf("expected 0 allocations in hot loop, got %.1f", allocs)
 	}
 }

@@ -15,3 +15,14 @@ func dlSym(lib uintptr, name string) (uintptr, error) {
 func dlClose(lib uintptr) error {
 	return purego.Dlclose(lib)
 }
+
+// dlPreloadGlobal opens the first loadable library from names with
+// RTLD_GLOBAL so its symbols can satisfy later-loaded libraries. Failures are
+// ignored; the handle is intentionally never closed.
+func dlPreloadGlobal(names ...string) {
+	for _, n := range names {
+		if _, err := purego.Dlopen(n, purego.RTLD_NOW|purego.RTLD_GLOBAL); err == nil {
+			return
+		}
+	}
+}

@@ -24,3 +24,5 @@ func dlSym(lib uintptr, name string) (uintptr, error) {
 func dlClose(lib uintptr) error {
 	return syscall.FreeLibrary(syscall.Handle(lib))
 }
+
+func dlPreloadGlobal(names ...string) {}

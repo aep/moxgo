@@ -42,7 +42,11 @@ var pullCmd = &cobra.Command{
 		name := args[0]
 		fmt.Printf("pulling %s\n", name)
 
-		stream, err := newClient().Pull(context.Background(),
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		stream, err := c.Pull(context.Background(),
 			connect.NewRequest(&gomaxv1.PullRequest{Model: name}))
 		if err != nil {
 			return err

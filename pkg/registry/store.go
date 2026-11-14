@@ -52,6 +52,12 @@ func ListLocal() ([]*server.ModelConfig, error) {
 	return models, nil
 }
 
+// LoadDir reads the model in dir, laid out as a pulled one: manifest.json,
+// model.onnx, and any label files the manifest names, under name.
+func LoadDir(name, dir string) (*server.ModelConfig, error) {
+	return loadLocalModel(name, filepath.Join(dir, "manifest.json"))
+}
+
 func loadLocalModel(name, manifestPath string) (*server.ModelConfig, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {

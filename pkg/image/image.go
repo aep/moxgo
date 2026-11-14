@@ -44,6 +44,46 @@ func FromImage(src image.Image, width, height int) *Tensor {
 	return prepare(src, width, height)
 }
 
+// DecodeUint8CHW reads an image and resizes it (plain stretch — no aspect
+// preservation, no padding) to width×height, returning a raw uint8 CHW [3,H,W]
+// buffer plus the original dimensions. This matches SAM 3's image-encoder
+// preprocessing: bilinear resize, RGB, no normalization (the model bakes it in).
+func DecodeUint8CHW(r io.Reader, width, height int) (data []uint8, srcW, srcH int, err error) {
+	src, _, e := image.Decode(r)
+	if e != nil {
+		return nil, 0, 0, fmt.Errorf("image: decode: %w", e)
+	}
+	d, w, h := prepareUint8CHW(src, width, height)
+	return d, w, h, nil
+}
+
+// FromImageUint8CHW is DecodeUint8CHW for an already-decoded image (e.g. a
+// camera frame).
+func FromImageUint8CHW(src image.Image, width, height int) (data []uint8, srcW, srcH int) {
+	return prepareUint8CHW(src, width, height)
+}
+
+func prepareUint8CHW(src image.Image, width, height int) ([]uint8, int, int) {
+	bounds := src.Bounds()
+	srcW, srcH := bounds.Dx(), bounds.Dy()
+
+	// Stretch to the target square (bilinear, closest to cv2.INTER_LINEAR).
+	resized := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.BiLinear.Scale(resized, resized.Bounds(), src, bounds, draw.Over, nil)
+
+	chSize := width * height
+	data := make([]uint8, 3*chSize)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			si := y*resized.Stride + x*4
+			data[0*chSize+y*width+x] = resized.Pix[si]   // R
+			data[1*chSize+y*width+x] = resized.Pix[si+1] // G
+			data[2*chSize+y*width+x] = resized.Pix[si+2] // B
+		}
+	}
+	return data, srcW, srcH
+}
+
 func prepare(src image.Image, width, height int) *Tensor {
 	bounds := src.Bounds()
 	srcW := bounds.Dx()
