@@ -303,7 +303,8 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 	_, pre := tracer.Start(ctx, "moxgo.preprocess")
 	inputBytes := 0
 	for _, in := range inputs {
-		inputBytes += len(in.GetFileBytes())
+		yc := in.GetYcbcr()
+		inputBytes += len(in.GetFileBytes()) + len(yc.GetY()) + len(yc.GetCb()) + len(yc.GetCr())
 	}
 	pre.SetAttributes(attrInputSize.Int(inputBytes))
 	var imgTensors []*goimage.Tensor
@@ -315,9 +316,21 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 
 		switch inp.Type {
 		case "image":
-			tensor, err := goimage.Decode(bytes.NewReader(reqInput.GetFileBytes()), inp.Width, inp.Height)
-			if err != nil {
-				return nil, inputErrorf("decode image %q: %w", inp.Name, err)
+			var tensor *goimage.Tensor
+			if yc := reqInput.GetYcbcr(); yc != nil {
+				img, err := goimage.YCbCr420(int(yc.GetWidth()), int(yc.GetHeight()), yc.GetY(), yc.GetCb(), yc.GetCr())
+				if err != nil {
+					pre.End()
+					return nil, inputErrorf("image %q: %w", inp.Name, err)
+				}
+				tensor = goimage.FromImage(img, inp.Width, inp.Height)
+			} else {
+				var err error
+				tensor, err = goimage.Decode(bytes.NewReader(reqInput.GetFileBytes()), inp.Width, inp.Height)
+				if err != nil {
+					pre.End()
+					return nil, inputErrorf("decode image %q: %w", inp.Name, err)
+				}
 			}
 			copy(slot.bufs[i], tensor.Data)
 			if len(inp.Mean) > 0 && len(inp.Std) > 0 {

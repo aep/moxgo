@@ -88,9 +88,23 @@ message PredictRequest {
 message Input {
   string name = 1;
   oneof data {
+    // an encoded file: an image (JPEG, PNG, ...) or audio
     bytes file_bytes = 2;
     RawTensor tensor = 3;
+    // an image as a video decoder hands it out, for an image input:
+    // preprocessed as an encoded image is, without the decoding
+    YCbCrImage ycbcr = 4;
   }
+}
+
+// YCbCrImage is a picture in YCbCr 4:2:0 (I420), its planes tightly packed:
+// y has width×height samples, cb and cr ((width+1)/2)×((height+1)/2) each.
+message YCbCrImage {
+  uint32 width = 1;
+  uint32 height = 2;
+  bytes y = 3;
+  bytes cb = 4;
+  bytes cr = 5;
 }
 
 message RawTensor {

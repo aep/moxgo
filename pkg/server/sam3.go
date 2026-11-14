@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	goimage "github.com/aep/moxgo/pkg/image"
 	gomaxv1 "github.com/aep/moxgo/pkg/proto/gomax/v1"
 	"github.com/aep/moxgo/pkg/sam3"
 
@@ -89,9 +90,17 @@ func (inst *Instance) predictSAM3(inputs []*gomaxv1.Input) (*gomaxv1.PredictResp
 	if len(prompts) == 0 {
 		return nil, inputErrorf("model %s: no prompts: send a %q input (e.g. \"boat,buoy\") or set prompts in the config", inst.Name, sam3PromptInput)
 	}
-	img, _, err := image.Decode(bytes.NewReader(imgIn.GetFileBytes()))
-	if err != nil {
-		return nil, inputErrorf("decode image: %w", err)
+	var img image.Image
+	if yc := imgIn.GetYcbcr(); yc != nil {
+		var err error
+		if img, err = goimage.YCbCr420(int(yc.GetWidth()), int(yc.GetHeight()), yc.GetY(), yc.GetCb(), yc.GetCr()); err != nil {
+			return nil, inputErrorf("image: %w", err)
+		}
+	} else {
+		var err error
+		if img, _, err = image.Decode(bytes.NewReader(imgIn.GetFileBytes())); err != nil {
+			return nil, inputErrorf("decode image: %w", err)
+		}
 	}
 
 	inst.sam3mu.Lock()

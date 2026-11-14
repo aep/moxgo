@@ -29,6 +29,26 @@ type Tensor struct {
 	SrcH  int
 }
 
+// YCbCr420 is a picture given as YCbCr 4:2:0 (I420) planes, tightly packed:
+// y of width×height samples, cb and cr of ((width+1)/2)×((height+1)/2). It
+// shares the planes, which must not change while it is used.
+func YCbCr420(width, height int, y, cb, cr []byte) (*image.YCbCr, error) {
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("image: YCbCr size %dx%d", width, height)
+	}
+	cw, ch := (width+1)/2, (height+1)/2
+	if len(y) != width*height || len(cb) != cw*ch || len(cr) != cw*ch {
+		return nil, fmt.Errorf("image: YCbCr %dx%d needs planes of %d, %d and %d bytes, has %d, %d and %d",
+			width, height, width*height, cw*ch, cw*ch, len(y), len(cb), len(cr))
+	}
+	return &image.YCbCr{
+		Y: y, Cb: cb, Cr: cr,
+		YStride: width, CStride: cw,
+		SubsampleRatio: image.YCbCrSubsampleRatio420,
+		Rect:           image.Rect(0, 0, width, height),
+	}, nil
+}
+
 // Decode reads an image from r, resizes it with letterboxing to width×height,
 // normalizes pixels to [0,1], and returns a CHW float32 tensor.
 func Decode(r io.Reader, width, height int) (*Tensor, error) {
@@ -101,9 +121,14 @@ func prepare(src image.Image, width, height int) *Tensor {
 	padX := (width - newW) / 2
 	padY := (height - newH) / 2
 
-	// Resize source to newW×newH using Catmull-Rom (high quality).
+	// Resize source to newW×newH using Catmull-Rom (high quality); at its
+	// own size it only needs converting to RGB.
 	resized := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	draw.CatmullRom.Scale(resized, resized.Bounds(), src, bounds, draw.Over, nil)
+	if newW == srcW && newH == srcH {
+		draw.Draw(resized, resized.Bounds(), src, bounds.Min, draw.Src)
+	} else {
+		draw.CatmullRom.Scale(resized, resized.Bounds(), src, bounds, draw.Over, nil)
+	}
 
 	// Build CHW float32 tensor with letterbox padding (pad value = 114/255).
 	const padVal = 114.0 / 255.0
