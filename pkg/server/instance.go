@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/aep/moxgo/pkg/onnx"
 	gomaxv1 "github.com/aep/moxgo/pkg/proto/gomax/v1"
 	"github.com/aep/moxgo/pkg/sam3"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const poolSize = 4
@@ -267,6 +269,20 @@ func (inst *Instance) warmSlot(slot *runSlot) error {
 
 // Predict runs single-shot inference.
 func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse, error) {
+	return inst.PredictContext(context.Background(), inputs)
+}
+
+// PredictContext is Predict, traced under ctx's span (see trace.go).
+func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Input) (resp *gomaxv1.PredictResponse, err error) {
+	ctx, span := tracer.Start(ctx, "moxgo.predict", inst.spanAttrs())
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	inst.mu.Lock()
 	if inst.closed {
 		inst.mu.Unlock()
@@ -279,9 +295,17 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 	}
 	inputs = withoutPrompt(inst.Config, inputs)
 
+	_, wait := tracer.Start(ctx, "moxgo.wait_slot")
 	slot := inst.acquireSlot()
+	wait.End()
 	defer inst.releaseSlot(slot)
 
+	_, pre := tracer.Start(ctx, "moxgo.preprocess")
+	inputBytes := 0
+	for _, in := range inputs {
+		inputBytes += len(in.GetFileBytes())
+	}
+	pre.SetAttributes(attrInputSize.Int(inputBytes))
 	var imgTensors []*goimage.Tensor
 	for i, inp := range inst.Config.InputList {
 		reqInput := findInput(inputs, inp.Name)
@@ -317,32 +341,43 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 		case "raw":
 			rawData := rawTensorToFloat32(reqInput.GetTensor())
 			if len(rawData) != len(slot.bufs[i]) {
+				pre.End()
 				return nil, inputErrorf("input %q: size %d != expected %d", inp.Name, len(rawData), len(slot.bufs[i]))
 			}
 			copy(slot.bufs[i], rawData)
 		}
 	}
+	pre.End()
 
 	if !slot.warmed {
-		if err := inst.warmSlot(slot); err != nil {
+		_, warm := tracer.Start(ctx, "moxgo.warmup")
+		err := inst.warmSlot(slot)
+		warm.End()
+		if err != nil {
 			return nil, err
 		}
 	}
 
+	_, infer := tracer.Start(ctx, "moxgo.inference")
 	start := time.Now()
-	if err := slot.run.Exec(); err != nil {
+	err = slot.run.Exec()
+	elapsed := time.Since(start)
+	infer.End()
+	if err != nil {
 		return nil, fmt.Errorf("exec: %w", err)
 	}
-	elapsed := time.Since(start)
 
 	var firstImg *goimage.Tensor
 	if len(imgTensors) > 0 {
 		firstImg = imgTensors[0]
 	}
 
-	resp := &gomaxv1.PredictResponse{
+	_, post := tracer.Start(ctx, "moxgo.postprocess")
+	defer post.End()
+	resp = &gomaxv1.PredictResponse{
 		InferenceTimeMs: float64(elapsed.Microseconds()) / 1000.0,
 	}
+	defer func() { post.SetAttributes(attrOutputs.Int(len(resp.GetOutputs()))) }()
 	for i, out := range inst.Session.Outputs {
 		oc := inst.Config.Outputs[out.Name]
 		if oc == nil {

@@ -143,12 +143,12 @@ func (s *Server) Rm(_ context.Context, req *connect.Request[gomaxv1.RmRequest]) 
 	return connect.NewResponse(&gomaxv1.RmResponse{}), nil
 }
 
-func (s *Server) Predict(_ context.Context, req *connect.Request[gomaxv1.PredictRequest]) (*connect.Response[gomaxv1.PredictResponse], error) {
+func (s *Server) Predict(ctx context.Context, req *connect.Request[gomaxv1.PredictRequest]) (*connect.Response[gomaxv1.PredictResponse], error) {
 	inst, err := s.mgr.GetOrRun(req.Msg.Model)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
-	resp, err := inst.Predict(req.Msg.Inputs)
+	resp, err := inst.PredictContext(ctx, req.Msg.Inputs)
 	if err != nil {
 		return nil, connect.NewError(errorCode(err), err)
 	}

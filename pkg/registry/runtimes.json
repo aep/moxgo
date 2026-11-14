@@ -258,22 +258,18 @@
       }
     },
     {
-      "comment": "Android arm64: Microsoft's ONNX Runtime on the CPU with XNNPACK (NNAPI reaches a vendor NPU on few phones and is slower than the CPU on the rest)",
+      "comment": "Android arm64: Microsoft's ONNX Runtime on the CPU (NNAPI reaches a vendor NPU on few phones and is slower than the CPU on the rest; XNNPACK is no faster than ORT's CPU kernels and cannot run int8 models' quantized softmax)",
       "match": {
         "os": "android",
         "arch": "arm64"
       },
       "runtime": {
         "core": "onnxruntime-android-arm64-1.29.0/libonnxruntime.so",
-        "eps": [
-          {
-            "name": "XNNPACK"
-          }
-        ]
+        "eps": []
       }
     },
     {
-      "comment": "Qualcomm Snapdragon: Qualcomm's QNN plugin on the HTP (NPU), then XNNPACK. The HTP library picks the stub of the phone's Hexagon generation by name, so all stubs are preloaded; the NPU loads the matching skel from ADSP_LIBRARY_PATH",
+      "comment": "Qualcomm Snapdragon: Qualcomm's QNN plugin on the HTP (NPU), else the CPU. The HTP library picks the stub of the phone's Hexagon generation by name, so all stubs are preloaded; the NPU loads the matching skel from ADSP_LIBRARY_PATH",
       "match": {
         "os": "android",
         "arch": "arm64",
@@ -303,9 +299,6 @@
             "options": {
               "backend_path": "${pkg:qnn-htp-android-2.51.0}/libQnnHtp.so"
             }
-          },
-          {
-            "name": "XNNPACK"
           }
         ]
       }
