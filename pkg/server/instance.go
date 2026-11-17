@@ -151,7 +151,41 @@ func (m *InstanceManager) Run(modelName string, ep string) (*Instance, error) {
 		slots:    make(chan *runSlot, poolSize),
 	}
 
+	// A provider can take a model and still fail to run it (QNN on a
+	// model with dynamic shapes, say): it runs on the CPU then.
+	if err := inst.tryRun(); err != nil && sess.ActiveEP != "CPU" {
+		fmt.Printf("  %s: does not run on %s (%v); on the CPU instead\n", modelName, sess.ActiveEP, err)
+		sess.Close()
+		cpu, cerr := m.rt.OpenSessionWith(cfg.Path, onnx.SessionOptions{
+			IntraOpThreads: threads,
+			LogLevel:       onnx.OrtLoggingLevelError,
+		})
+		if cerr != nil {
+			return nil, fmt.Errorf("open session on the CPU: %w (%s)", cerr, m.rt.LastError())
+		}
+		inst.Session, inst.ActiveEP = cpu, cpu.ActiveEP
+		fmt.Printf("  %s: ep=%s threads=%d\n", modelName, cpu.ActiveEP, threads)
+	}
+
 	return m.register(inst), nil
+}
+
+// tryRun runs the model once on zeros, as the warmup of its first slot,
+// which it keeps. A model with an input of no fixed size is not tried.
+func (inst *Instance) tryRun() error {
+	slot := inst.newSlot()
+	for _, b := range slot.bufs {
+		if b == nil {
+			slot.run.Close()
+			return nil
+		}
+	}
+	if err := inst.warmSlot(slot); err != nil {
+		slot.run.Close()
+		return err
+	}
+	inst.releaseSlot(slot)
+	return nil
 }
 
 // register adds a new instance, or returns (and keeps) one that another
