@@ -40,7 +40,7 @@ models:
       predictions:
         type: classification
         labels: models/birdnet-v3-labels.csv
-        sigmoid: 1.0
+        # BirdNET v3's ONNX export outputs probabilities already: no sigmoid
 
   sam3:
     pipeline: sam3
