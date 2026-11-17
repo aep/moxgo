@@ -293,7 +293,8 @@ func list() ([]Device, error) {
 	return result, nil
 }
 
-func open(index int) (Camera, error) {
+// TODO: honor opts.Width/Height (AVCaptureSession preset or video settings).
+func open(index int, _ Options) (Camera, error) {
 	if err := ensureInit(); err != nil {
 		return nil, err
 	}

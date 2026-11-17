@@ -28,6 +28,7 @@ var (
 	runEP        string
 	runCamera    bool
 	runCameraID  int
+	runCameraRes string
 	runFPS       float64
 	runStream    string
 	runPrompt    string
@@ -40,6 +41,7 @@ func init() {
 	runCmd.Flags().StringVar(&runEP, "ep", "", "execution provider (e.g. CUDA, CoreML)")
 	runCmd.Flags().BoolVar(&runCamera, "camera", false, "capture from camera instead of file")
 	runCmd.Flags().IntVar(&runCameraID, "camera-id", 0, "camera device index")
+	runCmd.Flags().StringVar(&runCameraRes, "camera-res", "640x480", "requested camera resolution WxH (driver picks the closest it supports)")
 	runCmd.Flags().Float64Var(&runFPS, "fps", 1, "frames per second for camera/stream capture")
 	runCmd.Flags().StringVar(&runStream, "stream", "", "video stream URL (http:// for MJPEG, rtsp:// for RTSP)")
 	runCmd.Flags().StringVar(&runPrompt, "prompt", "", "comma-separated text prompts (sam3 models)")
@@ -433,16 +435,29 @@ func runStreamLoop(c backend, model string) error {
 }
 
 func runCameraLoop(c backend, model string) error {
-	devices, _ := camera.List()
-	if runCameraID < len(devices) {
-		fmt.Printf("Camera: [%d] %s\n", devices[runCameraID].Index, devices[runCameraID].Name)
+	var opts camera.Options
+	if _, err := fmt.Sscanf(runCameraRes, "%dx%d", &opts.Width, &opts.Height); err != nil || opts.Width <= 0 || opts.Height <= 0 {
+		return fmt.Errorf("invalid --camera-res %q, want WxH (e.g. 1280x720)", runCameraRes)
 	}
 
-	cam, err := camera.Open(runCameraID)
+	devices, _ := camera.List()
+	if len(devices) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: no usable cameras found (see `moxgo cameras`)")
+	}
+	for _, d := range devices {
+		if d.Index == runCameraID {
+			fmt.Printf("Camera: [%d] %s\n", d.Index, d.Name)
+		}
+	}
+
+	cam, err := camera.Open(runCameraID, opts)
 	if err != nil {
 		return err
 	}
 	defer cam.Close()
+	if s, ok := cam.(interface{ Describe() string }); ok {
+		fmt.Printf("Format: %s\n", s.Describe())
+	}
 
 	fmt.Printf("Capturing at %.1f fps (Ctrl+C to stop)\n", runFPS)
 	return runVideoLoop(c, model, cam)

@@ -23,8 +23,22 @@ func List() ([]Device, error) {
 	return list()
 }
 
-func Open(index int) (Camera, error) {
-	return open(index)
+// Options controls how a camera is opened. Zero values mean defaults.
+type Options struct {
+	// Width and Height are the requested capture size. The driver may pick
+	// the closest size it supports. Default 640x480.
+	Width, Height int
+}
+
+func (o Options) withDefaults() Options {
+	if o.Width <= 0 || o.Height <= 0 {
+		o.Width, o.Height = 640, 480
+	}
+	return o
+}
+
+func Open(index int, opts Options) (Camera, error) {
+	return open(index, opts.withDefaults())
 }
 
 // OpenStream opens a video stream URL. HTTP/HTTPS URLs are handled natively
