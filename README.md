@@ -15,6 +15,23 @@ the builtin cli makes it easy to play with popular classification models
     > moxgo run yolo11n --file is_this_a_dog.png
 
 
+live detection
+--------------
+
+`--display` runs a model on live video and shows it with boxes, labels and masks
+drawn in. Video goes from the camera to the window at the camera's rate;
+detection takes the newest frame whenever it is free and never holds video up.
+
+    > moxgo run yolo11n --camera 0 --camera-res 1280x720 --display
+    > moxgo run yolo11n --stream rtsp://192.168.1.10/stream --display --stats
+    > moxgo run yolo11n --onvif http://192.168.1.10:8000/onvif/device_service --onvif-profile sub --display
+    > moxgo cameras --onvif
+
+camera credentials come from the URL, or better from `MOXGO_CAMERA_USER` and
+`MOXGO_CAMERA_PASSWORD`, and never appear in output. `--stats` prints per-stage
+timings; `--duration 30s` stops by itself.
+
+
 adding custom models
 --------------------
 

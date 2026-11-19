@@ -21,6 +21,10 @@ const ZeroAllocCalls = true
 // ortCall calls a C function pointer with up to 8 pointer-sized args, through
 // the C trampoline in vcall.c. All ORT API functions take pointer/size_t args
 // and return OrtStatus*; extra args beyond what the callee reads are harmless.
+// uintptrescapes keeps what uintptr(unsafe.Pointer(&x)) arguments point to off
+// the stack, which can move before the call is entered.
+//
+//go:uintptrescapes
 func ortCall(fn, a0, a1, a2, a3, a4, a5, a6, a7 uintptr) uintptr {
 	return uintptr(C.ort_vcall(C.uintptr_t(fn),
 		C.uintptr_t(a0), C.uintptr_t(a1), C.uintptr_t(a2), C.uintptr_t(a3),

@@ -1,4 +1,4 @@
-//go:build !(linux && cgo) && !darwin
+//go:build !(linux && (amd64 || arm64)) && !darwin
 
 package camera
 

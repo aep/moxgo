@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"sort"
 
 	goimage "github.com/aep/moxgo/pkg/image"
 	"github.com/aep/moxgo/pkg/labels"
@@ -68,25 +69,34 @@ func yoloDecode(data []float32, shape []int64, nClasses int) []yoloDet {
 	const confThreshold = 0.25
 	const iouThreshold = 0.45
 
-	var dets []yoloDet
-	for d := 0; d < nDets; d++ {
-		bestClass := 0
-		bestConf := data[4*nDets+d]
-		for c := 1; c < nClasses; c++ {
-			score := data[(4+c)*nDets+d]
-			if score > bestConf {
-				bestConf = score
-				bestClass = c
+	// Scan each class column for scores above the threshold (nearly all are
+	// below), keeping every anchor's best. A column is contiguous, which is
+	// several times faster than walking all classes of each anchor.
+	var hit []yoloDet
+	best := make(map[int]int) // anchor -> index in hit
+	for c := 0; c < nClasses; c++ {
+		col := data[(4+c)*nDets : (5+c)*nDets]
+		for d, v := range col {
+			if v < confThreshold {
+				continue
 			}
+			if i, ok := best[d]; ok {
+				if v > hit[i].conf {
+					hit[i].conf, hit[i].classIdx = v, c
+				}
+				continue
+			}
+			best[d] = len(hit)
+			hit = append(hit, yoloDet{classIdx: c, conf: v, anchor: d})
 		}
-		if bestConf < confThreshold {
-			continue
-		}
-		cx := data[0*nDets+d]
-		cy := data[1*nDets+d]
-		w := data[2*nDets+d]
-		h := data[3*nDets+d]
-		dets = append(dets, yoloDet{cx - w/2, cy - h/2, cx + w/2, cy + h/2, bestClass, bestConf, d})
+	}
+	// Anchor order, as a plain scan produces, for a stable sort below.
+	sort.Slice(hit, func(i, j int) bool { return hit[i].anchor < hit[j].anchor })
+	dets := hit
+	for i := range dets {
+		d := dets[i].anchor
+		cx, cy, w, h := data[d], data[nDets+d], data[2*nDets+d], data[3*nDets+d]
+		dets[i].x1, dets[i].y1, dets[i].x2, dets[i].y2 = cx-w/2, cy-h/2, cx+w/2, cy+h/2
 	}
 
 	// Sort descending by confidence

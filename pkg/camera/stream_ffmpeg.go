@@ -72,7 +72,7 @@ func (s *ffmpegStream) NextFrame() (image.Image, error) {
 		if s.err != nil && s.err != io.EOF {
 			return nil, fmt.Errorf("stream: ffmpeg: %w", s.err)
 		}
-		return nil, fmt.Errorf("stream: closed")
+		return nil, fmt.Errorf("stream: closed: %w", io.EOF)
 	}
 }
 

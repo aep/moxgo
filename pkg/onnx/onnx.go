@@ -185,6 +185,11 @@ func (rt *Runtime) vtable(slot int) uintptr { //nolint:govet
 }
 
 // call invokes ORT API slot with args, checks OrtStatus* return.
+// uintptrescapes moves what uintptr(unsafe.Pointer(&x)) arguments point to off
+// the stack: a stack can move before the call is entered, and ONNX Runtime would
+// then write its result to the old place.
+//
+//go:uintptrescapes
 func (rt *Runtime) call(slot int, a0, a1, a2, a3, a4, a5, a6, a7 uintptr) error {
 	status := ortCall(rt.vtable(slot),
 		uintptr(a0), uintptr(a1), uintptr(a2), uintptr(a3),

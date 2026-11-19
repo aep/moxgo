@@ -22,6 +22,13 @@ type Run struct {
 	outNamePtrs []uintptr
 	outputs     []Output
 	prepared    bool
+
+	// Out-parameters of GetOutput. They live here, on the heap, so that it
+	// stays free of allocations while ONNX Runtime writes to stable addresses.
+	outInfo  uintptr
+	outDtype int32
+	outNDims uintptr
+	outData  uintptr
 }
 
 // NewRun creates a new inference run.
@@ -55,6 +62,9 @@ func (r *Run) Bind(name string, dataPtr unsafe.Pointer, dataLen int, dtype ElemT
 	}
 	runtime.KeepAlive(shape)
 
+	if value == 0 {
+		return fmt.Errorf("onnx: no tensor created for input %q", name)
+	}
 	r.pinner.Pin(&nameC[0])
 	r.inputNames = append(r.inputNames, nameC)
 	r.inputPtrs = append(r.inputPtrs, unsafe.Pointer(&nameC[0]))
@@ -190,26 +200,26 @@ func (r *Run) GetOutput(index int) (*Output, error) {
 	out := &r.outputs[index]
 
 	// GetTensorTypeAndShape
-	var info uintptr
 	status := ortCall(sess.fnGetTensorTypeAndShape,
-		uintptr(v), uintptr(uintptr(unsafe.Pointer(&info))),
+		uintptr(v), uintptr(unsafe.Pointer(&r.outInfo)),
 		0, 0, 0, 0, 0, 0)
 	if err := sess.rt.check(uintptr(status)); err != nil {
 		return nil, err
 	}
 
+	info := r.outInfo
+
 	// GetTensorElementType
-	var dtype int32
 	ortCall(sess.fnGetTensorElementType,
-		uintptr(info), uintptr(uintptr(unsafe.Pointer(&dtype))),
+		uintptr(info), uintptr(unsafe.Pointer(&r.outDtype)),
 		0, 0, 0, 0, 0, 0)
-	out.Dtype = ElemType(dtype)
+	out.Dtype = ElemType(r.outDtype)
 
 	// GetDimensionsCount
-	var ndims uintptr
 	ortCall(sess.fnGetDimensionsCount,
-		uintptr(info), uintptr(uintptr(unsafe.Pointer(&ndims))),
+		uintptr(info), uintptr(unsafe.Pointer(&r.outNDims)),
 		0, 0, 0, 0, 0, 0)
+	ndims := r.outNDims
 
 	// GetDimensions — reuse pre-allocated shape buffer
 	if int(ndims) > cap(out.Shape) {
@@ -232,14 +242,13 @@ func (r *Run) GetOutput(index int) (*Output, error) {
 	out.Len = nElems
 
 	// GetTensorMutableData
-	var dataPtr uintptr
 	status = ortCall(sess.fnGetTensorMutableData,
-		uintptr(v), uintptr(uintptr(unsafe.Pointer(&dataPtr))),
+		uintptr(v), uintptr(unsafe.Pointer(&r.outData)),
 		0, 0, 0, 0, 0, 0)
 	if err := sess.rt.check(uintptr(status)); err != nil {
 		return nil, err
 	}
-	out.Ptr = unsafe.Pointer(dataPtr) //nolint:govet
+	out.Ptr = unsafe.Pointer(r.outData) //nolint:govet
 
 	return out, nil
 }

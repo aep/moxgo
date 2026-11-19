@@ -1,22 +1,26 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"image/jpeg"
+	"io"
 	"math/bits"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/aep/gaal"
 
 	"github.com/aep/moxgo/pkg/camera"
+	"github.com/aep/moxgo/pkg/live"
 	gomaxv1 "github.com/aep/moxgo/pkg/proto/gomax/v1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // --- run <model> [-f file] ---
@@ -39,7 +43,8 @@ func init() {
 	runCmd.Flags().StringVarP(&runInputName, "input", "n", "", "input name (optional if single input)")
 	runCmd.Flags().BoolVar(&runJSON, "json", false, "output raw JSON")
 	runCmd.Flags().StringVar(&runEP, "ep", "", "execution provider (e.g. CUDA, CoreML)")
-	runCmd.Flags().BoolVar(&runCamera, "camera", false, "capture from camera instead of file")
+	cam := runCmd.Flags().VarPF(cameraFlag{}, "camera", "", "capture from a camera instead of a file (--camera N picks device N)")
+	cam.NoOptDefVal = "true"
 	runCmd.Flags().IntVar(&runCameraID, "camera-id", 0, "camera device index")
 	runCmd.Flags().StringVar(&runCameraRes, "camera-res", "640x480", "requested camera resolution WxH (driver picks the closest it supports)")
 	runCmd.Flags().Float64Var(&runFPS, "fps", 1, "frames per second for camera/stream capture")
@@ -51,7 +56,19 @@ func init() {
 var runCmd = &cobra.Command{
 	Use:   "run <model>",
 	Short: "Load a model and optionally run inference",
-	Args:  cobra.ExactArgs(1),
+	Long: `Load a model and optionally run inference on a file, a camera or a stream.
+
+With --display or --stats it runs live: video goes from the source to the
+window at the source's rate, detection works on the newest frame beside it, and
+its latest boxes, labels and masks are drawn into the video. Examples:
+
+  moxgo run yolo11n --camera 0 --camera-res 1280x720 --display
+  moxgo run yolo11n --stream rtsp://host/stream --display --stats
+  moxgo run yolo11n --onvif http://host:8000/onvif/device_service --display
+
+Camera credentials come from the URL or from the MOXGO_CAMERA_USER and
+MOXGO_CAMERA_PASSWORD environment variables. They are never printed.`,
+	Args: runArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		nSources := 0
 		if runFile != "" {
@@ -63,15 +80,26 @@ var runCmd = &cobra.Command{
 		if runStream != "" {
 			nSources++
 		}
+		if runONVIF != "" {
+			nSources++
+		}
 		if nSources > 1 {
-			return fmt.Errorf("--file, --camera, and --stream are mutually exclusive")
+			return fmt.Errorf("--file, --camera, --stream and --onvif are mutually exclusive")
+		}
+		runFPSSet = cmd.Flags().Changed("fps")
+		isLive := runDisplay || runStats
+		if isLive && (runFile != "" || nSources == 0) {
+			return fmt.Errorf("--display and --stats need --camera, --stream or --onvif")
 		}
 
+		model, err := parseRunArgs(args)
+		if err != nil {
+			return err
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		model := args[0]
 
 		resp, err := c.Run(context.Background(),
 			connect.NewRequest(&gomaxv1.RunRequest{Model: model, Ep: runEP}))
@@ -80,11 +108,11 @@ var runCmd = &cobra.Command{
 		}
 		fmt.Printf("%s (ep=%s)\n", resp.Msg.Model, resp.Msg.Ep)
 
-		if runCamera {
-			return runCameraLoop(c, model)
+		if isLive {
+			return runLive(c, model)
 		}
-		if runStream != "" {
-			return runStreamLoop(c, model)
+		if runCamera || runStream != "" || runONVIF != "" {
+			return runCaptureLoop(c, model)
 		}
 
 		if runFile == "" {
@@ -356,109 +384,160 @@ func init() { rootCmd.AddCommand(camerasCmd) }
 
 var camerasCmd = &cobra.Command{
 	Use:   "cameras",
-	Short: "List available cameras",
+	Short: "List available cameras (with --onvif, also network cameras)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		devices, err := camera.List()
-		if err != nil {
+		if err != nil && !errors.Is(err, camera.ErrNotSupported) {
 			return err
 		}
 		if len(devices) == 0 {
 			fmt.Println("No cameras found.")
-			return nil
+		} else {
+			fmt.Printf("%-5s %s\n", "ID", "NAME")
+			for _, d := range devices {
+				fmt.Printf("%-5d %s\n", d.Index, d.Name)
+			}
 		}
-		fmt.Printf("%-5s %s\n", "ID", "NAME")
-		for _, d := range devices {
-			fmt.Printf("%-5d %s\n", d.Index, d.Name)
+		if camerasONVIF {
+			return listONVIF(cmd.Context())
 		}
 		return nil
 	},
 }
 
-// --- capture loops ---
+// --- capture loop ---
 
-func runVideoLoop(c backend, model string, cam camera.Camera) error {
+// cameraFlag is --camera: a switch, or the device number with --camera=N.
+type cameraFlag struct{}
+
+func (cameraFlag) String() string   { return strconv.FormatBool(runCamera) }
+func (cameraFlag) Type() string     { return "bool" }
+func (cameraFlag) IsBoolFlag() bool { return true }
+func (cameraFlag) Set(s string) error {
+	if v, err := strconv.ParseBool(s); err == nil && s != "0" && s != "1" {
+		runCamera = v
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return fmt.Errorf("want a camera number, got %q", s)
+	}
+	runCamera, runCameraID = true, n
+	return nil
+}
+
+var _ pflag.Value = cameraFlag{}
+
+// runArgs accepts <model>, and with --camera also a device number next to it.
+func runArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 2 && runCamera {
+		return nil
+	}
+	return cobra.ExactArgs(1)(cmd, args)
+}
+
+func parseRunArgs(args []string) (string, error) {
+	if len(args) == 1 {
+		return args[0], nil
+	}
+	if n, err := strconv.Atoi(args[1]); err == nil && n >= 0 {
+		runCameraID = n
+		return args[0], nil
+	}
+	if n, err := strconv.Atoi(args[0]); err == nil && n >= 0 {
+		runCameraID = n
+		return args[1], nil
+	}
+	return "", fmt.Errorf("expected a model and a camera number, got %q and %q", args[0], args[1])
+}
+
+// runCaptureLoop infers on the newest frame of the source at --fps, printing
+// results. Frames go out as YCbCr; nothing is encoded.
+func runCaptureLoop(c backend, model string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	src, err := openLiveSource(ctx)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	fmt.Printf("Source: %s\n", camera.Redact(src.Name()))
+	fmt.Printf("Capturing at %.1f fps (Ctrl+C to stop)\n", runFPS)
+
+	frames := live.NewMailbox[*gaal.VideoFrame]()
+	pumpDone := make(chan error, 1)
+	go func() {
+		for ctx.Err() == nil {
+			f, _, err := src.Next(time.Second)
+			if errors.Is(err, camera.ErrTimeout) {
+				continue
+			}
+			if err != nil {
+				pumpDone <- err
+				return
+			}
+			if old, ok := frames.Put(f); ok {
+				old.Release()
+			}
+		}
+		pumpDone <- nil
+	}()
+	defer func() {
+		if f, ok := frames.Close(); ok {
+			f.Release()
+		}
+	}()
+
+	det := live.NewRemoteDetector(nil, model, runInputName, runPrompt)
 	ticker := time.NewTicker(time.Duration(float64(time.Second) / runFPS))
 	defer ticker.Stop()
 
 	frame := 0
+	process := func() {
+		f, ok := takeNewest(frames)
+		if !ok {
+			return
+		}
+		err := det.Prepare(f)
+		f.Release()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "frame error: %v\n", err)
+			return
+		}
+		pred, err := c.Predict(ctx, connect.NewRequest(det.Request()))
+		if err != nil {
+			if ctx.Err() == nil {
+				fmt.Fprintf(os.Stderr, "predict error: %s\n", camera.Redact(err.Error()))
+			}
+			return
+		}
+		frame++
+		fmt.Printf("\n--- Frame %d ---\n", frame)
+		if runJSON {
+			printJSON(pred.Msg)
+		} else {
+			printPredictResponse(pred.Msg)
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			fmt.Println("\nStopped.")
 			return nil
+		case err := <-pumpDone:
+			process() // the last frame of a finite source
+			if err == nil || errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
 		case <-ticker.C:
-			img, err := cam.NextFrame()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "frame error: %v\n", err)
-				continue
-			}
-
-			var buf bytes.Buffer
-			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
-				fmt.Fprintf(os.Stderr, "encode error: %v\n", err)
-				continue
-			}
-
-			pred, err := c.Predict(context.Background(),
-				connect.NewRequest(&gomaxv1.PredictRequest{
-					Model:  model,
-					Inputs: withPrompt(newInput(runInputName, buf.Bytes()), runPrompt),
-				}))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "predict error: %v\n", err)
-				continue
-			}
-
-			frame++
-			fmt.Printf("\n--- Frame %d ---\n", frame)
-			if runJSON {
-				printJSON(pred.Msg)
-			} else {
-				printPredictResponse(pred.Msg)
-			}
+			process()
 		}
 	}
 }
 
-func runStreamLoop(c backend, model string) error {
-	fmt.Printf("Stream: %s\n", runStream)
-	cam, err := camera.OpenStream(runStream)
-	if err != nil {
-		return err
-	}
-	defer cam.Close()
-	fmt.Printf("Capturing at %.1f fps (Ctrl+C to stop)\n", runFPS)
-	return runVideoLoop(c, model, cam)
-}
-
-func runCameraLoop(c backend, model string) error {
-	var opts camera.Options
-	if _, err := fmt.Sscanf(runCameraRes, "%dx%d", &opts.Width, &opts.Height); err != nil || opts.Width <= 0 || opts.Height <= 0 {
-		return fmt.Errorf("invalid --camera-res %q, want WxH (e.g. 1280x720)", runCameraRes)
-	}
-
-	devices, _ := camera.List()
-	if len(devices) == 0 {
-		fmt.Fprintln(os.Stderr, "warning: no usable cameras found (see `moxgo cameras`)")
-	}
-	for _, d := range devices {
-		if d.Index == runCameraID {
-			fmt.Printf("Camera: [%d] %s\n", d.Index, d.Name)
-		}
-	}
-
-	cam, err := camera.Open(runCameraID, opts)
-	if err != nil {
-		return err
-	}
-	defer cam.Close()
-	if s, ok := cam.(interface{ Describe() string }); ok {
-		fmt.Printf("Format: %s\n", s.Describe())
-	}
-
-	fmt.Printf("Capturing at %.1f fps (Ctrl+C to stop)\n", runFPS)
-	return runVideoLoop(c, model, cam)
+// takeNewest empties the mailbox without waiting if nothing is there yet.
+func takeNewest(m *live.Mailbox[*gaal.VideoFrame]) (*gaal.VideoFrame, bool) {
+	return m.TryTake()
 }

@@ -24,6 +24,19 @@ type runSlot struct {
 	bufs   [][]float32
 	shapes [][]int64
 	warmed bool
+	// pre preprocesses YCbCr pictures for each input, made when first needed.
+	pre []*goimage.Preprocessor
+}
+
+// preprocessor returns the input's Preprocessor.
+func (s *runSlot) preprocessor(i int, inp *InputConfig) *goimage.Preprocessor {
+	if s.pre == nil {
+		s.pre = make([]*goimage.Preprocessor, len(s.bufs))
+	}
+	if s.pre[i] == nil {
+		s.pre[i] = goimage.NewPreprocessor(inp.Width, inp.Height, inp.Mean, inp.Std)
+	}
+	return s.pre[i]
 }
 
 // Instance is a running model (keyed by model name).
@@ -350,21 +363,23 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 
 		switch inp.Type {
 		case "image":
-			var tensor *goimage.Tensor
 			if yc := reqInput.GetYcbcr(); yc != nil {
 				img, err := goimage.YCbCr420(int(yc.GetWidth()), int(yc.GetHeight()), yc.GetY(), yc.GetCb(), yc.GetCr())
 				if err != nil {
 					pre.End()
 					return nil, inputErrorf("image %q: %w", inp.Name, err)
 				}
-				tensor = goimage.FromImage(img, inp.Width, inp.Height)
-			} else {
-				var err error
-				tensor, err = goimage.Decode(bytes.NewReader(reqInput.GetFileBytes()), inp.Width, inp.Height)
-				if err != nil {
-					pre.End()
-					return nil, inputErrorf("decode image %q: %w", inp.Name, err)
-				}
+				planes, _ := goimage.PlanesFromYCbCr(img)
+				pp := slot.preprocessor(i, inp)
+				pp.Invalidate() // the slot may have held another picture
+				lb := pp.Process(slot.bufs[i], &planes)
+				imgTensors = append(imgTensors, lb.Tensor(inp.Width, inp.Height))
+				continue
+			}
+			tensor, err := goimage.Decode(bytes.NewReader(reqInput.GetFileBytes()), inp.Width, inp.Height)
+			if err != nil {
+				pre.End()
+				return nil, inputErrorf("decode image %q: %w", inp.Name, err)
 			}
 			copy(slot.bufs[i], tensor.Data)
 			if len(inp.Mean) > 0 && len(inp.Std) > 0 {

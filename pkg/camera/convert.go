@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+
+	"github.com/aep/gaal"
 )
 
 // fourcc builds a V4L2 pixel format code.
@@ -209,4 +211,149 @@ func planar420(y []byte, yStride int, u, v []byte, cStride, w, h int) (image.Ima
 		copy(img.Cr[row*img.CStride:row*img.CStride+cw], v[row*cStride:])
 	}
 	return img, nil
+}
+
+// rawToVideoFrame converts a raw (not JPEG) capture to a gaal frame, the
+// 4:2:0 formats by copying planes and 4:2:2 by averaging chroma rows.
+func rawToVideoFrame(f *rawFrame, pool *gaal.FramePool) (*gaal.VideoFrame, error) {
+	if len(f.planes) == 0 {
+		return nil, fmt.Errorf("camera: frame has no planes")
+	}
+	w, h := f.width, f.height
+	switch f.format {
+	case pixFmtYUYV:
+		return packed422Frame(f.planes[0], w, h, f.stride(0, (w+1)/2*4), 0, 1, 2, 3, pool)
+	case pixFmtUYVY:
+		return packed422Frame(f.planes[0], w, h, f.stride(0, (w+1)/2*4), 1, 0, 3, 2, pool)
+	case pixFmtYVYU:
+		return packed422Frame(f.planes[0], w, h, f.stride(0, (w+1)/2*4), 0, 3, 2, 1, pool)
+
+	case pixFmtNV12, pixFmtNV21:
+		ys := f.stride(0, w)
+		y := f.planes[0]
+		if len(y) < ys*h {
+			return nil, errShort(f, 0)
+		}
+		return semiPlanarFrame(y[:ys*h], ys, y[ys*h:], ys, w, h, f.format == pixFmtNV21, pool)
+	case pixFmtNV12M, pixFmtNV21M:
+		if len(f.planes) < 2 {
+			return nil, fmt.Errorf("camera: %s needs 2 planes, got %d", fourccString(f.format), len(f.planes))
+		}
+		ys := f.stride(0, w)
+		return semiPlanarFrame(f.planes[0], ys, f.planes[1], f.stride(1, ys), w, h, f.format == pixFmtNV21M, pool)
+
+	case pixFmtYUV420, pixFmtYVU420:
+		ys := f.stride(0, w)
+		cs := (ys + 1) / 2
+		ch := (h + 1) / 2
+		p := f.planes[0]
+		ySize, cSize := ys*h, cs*ch
+		if len(p) < ySize+2*cSize {
+			return nil, errShort(f, 0)
+		}
+		u, v := p[ySize:ySize+cSize], p[ySize+cSize:ySize+2*cSize]
+		if f.format == pixFmtYVU420 {
+			u, v = v, u
+		}
+		return planarFrame(p[:ySize], ys, u, v, cs, w, h, pool)
+	case pixFmtYUV420M:
+		if len(f.planes) < 3 {
+			return nil, fmt.Errorf("camera: YM12 needs 3 planes, got %d", len(f.planes))
+		}
+		return planarFrame(f.planes[0], f.stride(0, w), f.planes[1], f.planes[2], f.stride(1, (w+1)/2), w, h, pool)
+
+	case pixFmtGREY:
+		s := f.stride(0, w)
+		if len(f.planes[0]) < s*(h-1)+w {
+			return nil, errShort(f, 0)
+		}
+		out := pool.Get(w, h, gaal.I420)
+		for row := range h {
+			copy(out.Y[row*out.YStride:row*out.YStride+w], f.planes[0][row*s:])
+		}
+		fillBytes(out.U, 128)
+		fillBytes(out.V, 128)
+		out.Range = gaal.RangeFull
+		return out, nil
+	}
+	return nil, fmt.Errorf("camera: unsupported pixel format %s", fourccString(f.format))
+}
+
+func fillBytes(b []byte, v byte) {
+	for i := range b {
+		b[i] = v
+	}
+}
+
+func packed422Frame(data []byte, w, h, stride, y0, u, y1, v int, pool *gaal.FramePool) (*gaal.VideoFrame, error) {
+	if len(data) < stride*(h-1)+(w+1)/2*4 {
+		return nil, fmt.Errorf("camera: short packed 4:2:2 frame (%d bytes for %dx%d)", len(data), w, h)
+	}
+	out := pool.Get(w, h, gaal.I420)
+	cw := (w + 1) / 2
+	for row := range h {
+		src := data[row*stride : row*stride+cw*4]
+		yd := out.Y[row*out.YStride : row*out.YStride+w]
+		for x := 0; x+1 < w; x += 2 {
+			m := src[x*2 : x*2+4]
+			yd[x], yd[x+1] = m[y0], m[y1]
+		}
+		if w%2 == 1 {
+			yd[w-1] = src[(w-1)*2+y0]
+		}
+	}
+	for row := 0; row < (h+1)/2; row++ {
+		a := data[2*row*stride : 2*row*stride+cw*4]
+		b := a
+		if 2*row+1 < h {
+			b = data[(2*row+1)*stride : (2*row+1)*stride+cw*4]
+		}
+		ud := out.U[row*out.UVStride : row*out.UVStride+cw]
+		vd := out.V[row*out.UVStride : row*out.UVStride+cw]
+		for x := range cw {
+			ud[x] = byte((int(a[x*4+u]) + int(b[x*4+u]) + 1) >> 1)
+			vd[x] = byte((int(a[x*4+v]) + int(b[x*4+v]) + 1) >> 1)
+		}
+	}
+	return out, nil
+}
+
+func semiPlanarFrame(y []byte, yStride int, uv []byte, uvStride, w, h int, swap bool, pool *gaal.FramePool) (*gaal.VideoFrame, error) {
+	cw, ch := (w+1)/2, (h+1)/2
+	if len(y) < yStride*(h-1)+w || len(uv) < uvStride*(ch-1)+cw*2 {
+		return nil, fmt.Errorf("camera: short 4:2:0 semi-planar frame (y=%d uv=%d bytes for %dx%d)", len(y), len(uv), w, h)
+	}
+	out := pool.Get(w, h, gaal.NV12)
+	for row := range h {
+		copy(out.Y[row*out.YStride:row*out.YStride+w], y[row*yStride:])
+	}
+	for row := range ch {
+		d := out.U[row*out.UVStride : row*out.UVStride+cw*2]
+		s := uv[row*uvStride : row*uvStride+cw*2]
+		if !swap {
+			copy(d, s)
+			continue
+		}
+		for x := 0; x < len(d); x += 2 {
+			d[x], d[x+1] = s[x+1], s[x]
+		}
+	}
+	return out, nil
+}
+
+func planarFrame(y []byte, yStride int, u, v []byte, cStride, w, h int, pool *gaal.FramePool) (*gaal.VideoFrame, error) {
+	cw, ch := (w+1)/2, (h+1)/2
+	need := cStride*(ch-1) + cw
+	if len(y) < yStride*(h-1)+w || len(u) < need || len(v) < need {
+		return nil, fmt.Errorf("camera: short 4:2:0 planar frame (%dx%d)", w, h)
+	}
+	out := pool.Get(w, h, gaal.I420)
+	for row := range h {
+		copy(out.Y[row*out.YStride:row*out.YStride+w], y[row*yStride:])
+	}
+	for row := range ch {
+		copy(out.U[row*out.UVStride:row*out.UVStride+cw], u[row*cStride:])
+		copy(out.V[row*out.UVStride:row*out.UVStride+cw], v[row*cStride:])
+	}
+	return out, nil
 }
