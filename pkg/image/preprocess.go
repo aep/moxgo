@@ -207,20 +207,35 @@ func (p *Preprocessor) Process(dst []float32, src *Planes) Letterbox {
 	return lb
 }
 
-// fillPad writes the border, unless dst already has it.
+// fillPad writes the border, unless dst already has it: the rows above and
+// below the picture, and the columns beside it. The picture's own pixels
+// are written by every Process.
 func (p *Preprocessor) fillPad(dst []float32, lb Letterbox) {
 	if p.padDone == &dst[0] {
 		return
 	}
 	ch := p.w * p.h
+	top, bottom := lb.PadY*p.w, (lb.PadY+lb.ContentH)*p.w
+	right := lb.PadX + lb.ContentW
 	for c := range 3 {
 		plane := dst[c*ch : (c+1)*ch]
 		v := p.pad[c]
-		for i := range plane {
-			plane[i] = v
+		fill(plane[:top], v)
+		fill(plane[bottom:], v)
+		if lb.PadX > 0 || right < p.w {
+			for o := top; o < bottom; o += p.w {
+				fill(plane[o:o+lb.PadX], v)
+				fill(plane[o+right:o+p.w], v)
+			}
 		}
 	}
 	p.padDone = &dst[0]
+}
+
+func fill(s []float32, v float32) {
+	for i := range s {
+		s[i] = v
+	}
 }
 
 // convertRows produces model rows lo..hi of the current job.

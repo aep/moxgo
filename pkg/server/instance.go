@@ -26,6 +26,8 @@ type runSlot struct {
 	warmed bool
 	// pre preprocesses YCbCr pictures for each input, made when first needed.
 	pre []*goimage.Preprocessor
+	// yolo is what Detect decodes YOLO outputs in
+	yolo yoloScratch
 }
 
 // preprocessor returns the input's Preprocessor.
@@ -47,7 +49,10 @@ type Instance struct {
 	ActiveEP string
 	Threads  int
 
-	slots  chan *runSlot
+	slots chan *runSlot
+	// use is held for reading by each prediction and for writing by close,
+	// so the session is not freed under a prediction still running
+	use    sync.RWMutex
 	mu     sync.Mutex
 	closed bool
 
@@ -273,11 +278,19 @@ func (inst *Instance) acquireSlot() *runSlot {
 	}
 }
 
+// releaseSlot returns a slot to the pool, or closes it (releasing its
+// Pinner) when the pool is full or the instance closed meanwhile: a
+// prediction that was running when it closed ends here.
 func (inst *Instance) releaseSlot(s *runSlot) {
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	if inst.closed {
+		s.run.Close()
+		return
+	}
 	select {
 	case inst.slots <- s:
 	default:
-		// Pool full — close this slot to release the Pinner
 		s.run.Close()
 	}
 }
@@ -321,7 +334,7 @@ func (inst *Instance) Predict(inputs []*gomaxv1.Input) (*gomaxv1.PredictResponse
 
 // PredictContext is Predict, traced under ctx's span (see trace.go).
 func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Input) (resp *gomaxv1.PredictResponse, err error) {
-	ctx, span := tracer.Start(ctx, "moxgo.predict", inst.spanAttrs())
+	ctx, span := inst.startPredict(ctx)
 	defer func() {
 		if err != nil {
 			span.RecordError(err)
@@ -330,30 +343,30 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 		span.End()
 	}()
 
-	inst.mu.Lock()
-	if inst.closed {
-		inst.mu.Unlock()
+	if !inst.begin() {
 		return nil, fmt.Errorf("model %s is stopped", inst.Name)
 	}
-	inst.mu.Unlock()
+	defer inst.use.RUnlock()
 
 	if inst.sam3 != nil {
 		return inst.predictSAM3(inputs)
 	}
 	inputs = withoutPrompt(inst.Config, inputs)
 
-	_, wait := tracer.Start(ctx, "moxgo.wait_slot")
+	_, wait := startSpan(ctx, "moxgo.wait_slot")
 	slot := inst.acquireSlot()
 	wait.End()
 	defer inst.releaseSlot(slot)
 
-	_, pre := tracer.Start(ctx, "moxgo.preprocess")
+	_, pre := startSpan(ctx, "moxgo.preprocess")
 	inputBytes := 0
 	for _, in := range inputs {
 		yc := in.GetYcbcr()
 		inputBytes += len(in.GetFileBytes()) + len(yc.GetY()) + len(yc.GetCb()) + len(yc.GetCr())
 	}
-	pre.SetAttributes(attrInputSize.Int(inputBytes))
+	if pre.IsRecording() {
+		pre.SetAttributes(attrInputSize.Int(inputBytes))
+	}
 	var imgTensors []*goimage.Tensor
 	for i, inp := range inst.Config.InputList {
 		reqInput := findInput(inputs, inp.Name)
@@ -412,7 +425,7 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 	pre.End()
 
 	if !slot.warmed {
-		_, warm := tracer.Start(ctx, "moxgo.warmup")
+		_, warm := startSpan(ctx, "moxgo.warmup")
 		err := inst.warmSlot(slot)
 		warm.End()
 		if err != nil {
@@ -420,7 +433,7 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 		}
 	}
 
-	_, infer := tracer.Start(ctx, "moxgo.inference")
+	_, infer := startSpan(ctx, "moxgo.inference")
 	start := time.Now()
 	err = slot.run.Exec()
 	elapsed := time.Since(start)
@@ -434,12 +447,14 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 		firstImg = imgTensors[0]
 	}
 
-	_, post := tracer.Start(ctx, "moxgo.postprocess")
+	_, post := startSpan(ctx, "moxgo.postprocess")
 	defer post.End()
 	resp = &gomaxv1.PredictResponse{
 		InferenceTimeMs: float64(elapsed.Microseconds()) / 1000.0,
 	}
-	defer func() { post.SetAttributes(attrOutputs.Int(len(resp.GetOutputs()))) }()
+	if post.IsRecording() {
+		defer func() { post.SetAttributes(attrOutputs.Int(len(resp.GetOutputs()))) }()
+	}
 	for i, out := range inst.Session.Outputs {
 		oc := inst.Config.Outputs[out.Name]
 		if oc == nil {
@@ -456,12 +471,10 @@ func (inst *Instance) PredictContext(ctx context.Context, inputs []*gomaxv1.Inpu
 
 // PredictChunked runs chunked audio inference.
 func (inst *Instance) PredictChunked(inputs []*gomaxv1.Input, fn func(*gomaxv1.PredictStreamResponse) error) error {
-	inst.mu.Lock()
-	if inst.closed {
-		inst.mu.Unlock()
+	if !inst.begin() {
 		return fmt.Errorf("model %s is stopped", inst.Name)
 	}
-	inst.mu.Unlock()
+	defer inst.use.RUnlock()
 
 	if inst.sam3 != nil || len(inst.Config.InputList) != 1 || inst.Config.InputList[0].Type != "audio" {
 		return fmt.Errorf("streaming only supported for single-audio-input models")
@@ -538,17 +551,39 @@ func (inst *Instance) PredictChunked(inputs []*gomaxv1.Input, fn func(*gomaxv1.P
 	return nil
 }
 
+// begin starts a prediction: false when the instance is closed. On true
+// the caller holds inst.use for reading until it is done.
+func (inst *Instance) begin() bool {
+	inst.use.RLock()
+	inst.mu.Lock()
+	closed := inst.closed
+	inst.mu.Unlock()
+	if closed {
+		inst.use.RUnlock()
+		return false
+	}
+	return true
+}
+
 func (inst *Instance) close() {
+	inst.use.Lock() // the predictions running end first
+	defer inst.use.Unlock()
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
 	if inst.closed {
 		return
 	}
 	inst.closed = true
-	// Drain and close all pooled slots
-	close(inst.slots)
-	for slot := range inst.slots {
-		slot.run.Close()
+	// Close the pooled slots. The channel stays open: a slot in use is
+	// closed when it comes back (releaseSlot).
+	for {
+		select {
+		case slot := <-inst.slots:
+			slot.run.Close()
+			continue
+		default:
+		}
+		break
 	}
 	if inst.Session != nil {
 		inst.Session.Close()
@@ -595,7 +630,7 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 			or.Result = &gomaxv1.OutputResult_Detections{Detections: dets}
 		default: // "yolo" — boxes are packed inline in the single output tensor.
 			or.Result = &gomaxv1.OutputResult_Detections{
-				Detections: DetectOutput(data, result.Shape, oc.ResolvedLabels, imgTensor),
+				Detections: detectOutput(&slot.yolo, data, result.Shape, oc.ResolvedLabels, imgTensor),
 			}
 		}
 	case "segmentation":
@@ -604,7 +639,7 @@ func buildOutputResult(name string, oc *OutputConfig, result *onnx.Output, imgTe
 			or.Result = &gomaxv1.OutputResult_Raw{Raw: RawOutput(data, result.Shape)}
 			break
 		}
-		or.Result = &gomaxv1.OutputResult_Detections{Detections: SegmentOutput(
+		or.Result = &gomaxv1.OutputResult_Detections{Detections: segmentOutput(&slot.yolo, 
 			data, result.Shape, unsafe.Slice((*float32)(protos.Ptr), protos.Len), protos.Shape,
 			oc.ResolvedLabels, imgTensor)}
 	case "classification":

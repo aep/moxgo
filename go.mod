@@ -15,7 +15,7 @@ require (
 )
 
 require (
-	github.com/aep/gaal v0.0.0
+	github.com/aep/gaal v0.0.0-20261122182935-6d9b202a09a9
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -29,5 +29,3 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
 )
-
-replace github.com/aep/gaal => ../../gorm

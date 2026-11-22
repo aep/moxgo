@@ -148,6 +148,21 @@ func BenchmarkPreprocess(b *testing.B) {
 	}
 }
 
+// BenchmarkPreprocessInvalidated is a picture already at the model's
+// width (a 720p frame halved), with dst invalidated before each call, as
+// an Instance does: the slot may have held another picture.
+func BenchmarkPreprocessInvalidated(b *testing.B) {
+	img := image.NewYCbCr(image.Rect(0, 0, 640, 360), image.YCbCrSubsampleRatio420)
+	src, _ := PlanesFromYCbCr(img)
+	p := NewPreprocessor(640, 640, nil, nil)
+	dst := make([]float32, 3*640*640)
+	b.SetBytes(640 * 360)
+	for b.Loop() {
+		p.Invalidate()
+		p.Process(dst, &src)
+	}
+}
+
 func BenchmarkReferencePath(b *testing.B) {
 	img := image.NewYCbCr(image.Rect(0, 0, 1280, 720), image.YCbCrSubsampleRatio420)
 	for i := range img.Y {

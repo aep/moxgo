@@ -2,7 +2,7 @@ package server
 
 import (
 	"math"
-	"sort"
+	"slices"
 
 	goimage "github.com/aep/moxgo/pkg/image"
 	"github.com/aep/moxgo/pkg/labels"
@@ -62,36 +62,52 @@ type yoloDet struct {
 	anchor         int
 }
 
-// yoloDecode decodes YOLO-style [1, 4+C(+M), N] output, the class scores
-// being the nClasses channels after the box, with NMS.
-func yoloDecode(data []float32, shape []int64, nClasses int) []yoloDet {
+// yoloScratch is what decoding a YOLO output works in, kept to decode the
+// next one without allocating.
+type yoloScratch struct {
+	hit  []yoloDet
+	best []int32 // per anchor: its index in hit + 1; 0: none
+	keep []bool
+}
+
+// decode decodes YOLO-style [1, 4+C(+M), N] output, the class scores being
+// the nClasses channels after the box, with NMS. The result is valid until
+// the next decode.
+func (s *yoloScratch) decode(data []float32, shape []int64, nClasses int) []yoloDet {
 	nDets := int(shape[2])
 	const confThreshold = 0.25
 	const iouThreshold = 0.45
 
+	if cap(s.best) < nDets {
+		s.best = make([]int32, nDets)
+	}
+	best := s.best[:nDets]
 	// Scan each class column for scores above the threshold (nearly all are
 	// below), keeping every anchor's best. A column is contiguous, which is
 	// several times faster than walking all classes of each anchor.
-	var hit []yoloDet
-	best := make(map[int]int) // anchor -> index in hit
+	hit := s.hit[:0]
 	for c := 0; c < nClasses; c++ {
 		col := data[(4+c)*nDets : (5+c)*nDets]
 		for d, v := range col {
 			if v < confThreshold {
 				continue
 			}
-			if i, ok := best[d]; ok {
-				if v > hit[i].conf {
-					hit[i].conf, hit[i].classIdx = v, c
+			if i := best[d]; i > 0 {
+				if v > hit[i-1].conf {
+					hit[i-1].conf, hit[i-1].classIdx = v, c
 				}
 				continue
 			}
-			best[d] = len(hit)
 			hit = append(hit, yoloDet{classIdx: c, conf: v, anchor: d})
+			best[d] = int32(len(hit)) //nolint:gosec // at most nDets
 		}
 	}
+	for _, h := range hit {
+		best[h.anchor] = 0 // clean for the next decode
+	}
+	s.hit = hit
 	// Anchor order, as a plain scan produces, for a stable sort below.
-	sort.Slice(hit, func(i, j int) bool { return hit[i].anchor < hit[j].anchor })
+	slices.SortFunc(hit, func(a, b yoloDet) int { return a.anchor - b.anchor })
 	dets := hit
 	for i := range dets {
 		d := dets[i].anchor
@@ -107,7 +123,10 @@ func yoloDecode(data []float32, shape []int64, nClasses int) []yoloDet {
 	}
 
 	// NMS per class
-	keep := make([]bool, len(dets))
+	if cap(s.keep) < len(dets) {
+		s.keep = make([]bool, len(dets))
+	}
+	keep := s.keep[:len(dets)]
 	for i := range keep {
 		keep[i] = true
 	}
@@ -154,6 +173,11 @@ func yoloDetection(d yoloDet, lbls labels.Labels, imgTensor *goimage.Tensor) *go
 
 // DetectOutput decodes YOLO-style [1, 4+C, N] output with NMS and coordinate mapping.
 func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
+	return detectOutput(new(yoloScratch), data, shape, lbls, imgTensor)
+}
+
+// detectOutput is DetectOutput, decoding in s.
+func detectOutput(s *yoloScratch, data []float32, shape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
 	nClasses := int(shape[1]) - 4
 	// A segmentation model (YOLO -seg) has its mask coefficients after the
 	// class scores: with fewer labels than channels, only the labels' are
@@ -162,7 +186,7 @@ func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *
 		nClasses = n
 	}
 	items := make([]*gomaxv1.Detection, 0)
-	for _, d := range yoloDecode(data, shape, nClasses) {
+	for _, d := range s.decode(data, shape, nClasses) {
 		items = append(items, yoloDetection(d, lbls, imgTensor))
 	}
 	return &gomaxv1.Detections{Items: items}
@@ -174,6 +198,11 @@ func DetectOutput(data []float32, shape []int64, lbls labels.Labels, imgTensor *
 // A detection's mask is sigmoid(coefficients · prototypes) > 0.5, upsampled
 // to the original image and cut to the detection's box.
 func SegmentOutput(data []float32, shape []int64, protos []float32, protoShape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
+	return segmentOutput(new(yoloScratch), data, shape, protos, protoShape, lbls, imgTensor)
+}
+
+// segmentOutput is SegmentOutput, decoding in s.
+func segmentOutput(s *yoloScratch, data []float32, shape []int64, protos []float32, protoShape []int64, lbls labels.Labels, imgTensor *goimage.Tensor) *gomaxv1.Detections {
 	nm := int(protoShape[1])
 	ph, pw := int(protoShape[2]), int(protoShape[3])
 	nClasses := int(shape[1]) - 4 - nm
@@ -184,7 +213,7 @@ func SegmentOutput(data []float32, shape []int64, protos []float32, protoShape [
 
 	items := make([]*gomaxv1.Detection, 0)
 	coef := make([]float32, nm)
-	for _, d := range yoloDecode(data, shape, nClasses) {
+	for _, d := range s.decode(data, shape, nClasses) {
 		det := yoloDetection(d, lbls, imgTensor)
 		for k := range coef {
 			coef[k] = data[(4+nClasses+k)*nDets+d.anchor]
