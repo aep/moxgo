@@ -116,11 +116,11 @@ func downloadFile(url, dst, expectedSHA256 string, progress func(int64)) error {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	tmp := dst + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := createTemp(dst)
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 
 	h := sha256.New()
 	w := io.MultiWriter(f, h)

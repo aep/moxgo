@@ -139,19 +139,25 @@ func download(url, dst, sha, name string, size int64, progress func(Progress)) e
 	return nil
 }
 
-// fetchArchive downloads src into root/.downloads, checks it, hands each
-// member to extract and deletes the download.
+// fetchArchive downloads src into a directory of its own under
+// root/.downloads, checks it, hands each member to extract and deletes the
+// download. The directory is this call's alone: another process fetching
+// the same archive at once cannot replace or delete it.
 func fetchArchive(root string, src *Archive, extract func(path string, r io.Reader) error, progress func(Progress)) error {
-	tmpDir := filepath.Join(root, ".downloads")
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	downloads := filepath.Join(root, ".downloads")
+	if err := os.MkdirAll(downloads, 0o755); err != nil {
 		return err
 	}
-	tmp := filepath.Join(tmpDir, src.SHA256)
+	tmpDir, err := os.MkdirTemp(downloads, src.SHA256+".*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+	tmp := filepath.Join(tmpDir, "archive")
 	name := src.URL[strings.LastIndex(src.URL, "/")+1:]
 	if err := download(src.URL, tmp, src.SHA256, name, src.Size, progress); err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(tmp) }()
 
 	format := src.Format
 	if format == "" {
@@ -214,11 +220,11 @@ func fetchArchive(root string, src *Archive, extract func(path string, r io.Read
 
 // writeVerified writes r to dst if its sha256 is sha.
 func writeVerified(dst string, r io.Reader, sha string) error {
-	tmp := dst + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := createTemp(dst)
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	h := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(f, h), r); err != nil {
 		_ = f.Close()

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -382,5 +383,74 @@ func TestBundleRuntimeFlat(t *testing.T) {
 	err = BundleRuntime(rs, []string{"pa", "clash"}, cache, Layout{Root: t.TempDir(), Flat: true}, nil)
 	if err == nil || !strings.Contains(err.Error(), "both have liba.so") {
 		t.Errorf("clash: err = %v", err)
+	}
+}
+
+// Builds bundle runtimes for several platforms at once into one cache, and
+// platforms can share a source archive. Each install fetches the archive
+// itself; none may replace or delete another's download, or the file it is
+// writing.
+func TestInstallRuntimeConcurrent(t *testing.T) {
+	mac, win := []byte("mac library"), []byte("windows library")
+	var zbuf bytes.Buffer
+	zw := zip.NewWriter(&zbuf)
+	for name, b := range map[string][]byte{"osx/libort.dylib": mac, "win/ort.dll": win} {
+		w, _ := zw.Create(name)
+		_, _ = w.Write(b)
+	}
+	_ = zw.Close()
+
+	// Every install waits for the others before its download completes,
+	// so the downloads overlap.
+	const n = 6
+	var arrived sync.WaitGroup
+	arrived.Add(n)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived.Done()
+		arrived.Wait()
+		_, _ = w.Write(zbuf.Bytes())
+	}))
+	defer srv.Close()
+
+	js := fmt.Sprintf(`{"packages": {
+	  "mac": {"source": {"url": "%[1]s/ort.nupkg", "sha256": "%[2]s", "format": "zip"},
+	          "files": [{"name": "libort.dylib", "path": "osx/libort.dylib", "sha256": "%[3]s"}]},
+	  "win": {"source": {"url": "%[1]s/ort.nupkg", "sha256": "%[2]s", "format": "zip"},
+	          "files": [{"name": "ort.dll", "path": "win/ort.dll", "sha256": "%[4]s"}]}
+	}, "rules": []}`, srv.URL, hexSHA(zbuf.Bytes()), hexSHA(mac), hexSHA(win))
+	rs, err := ParseRuntimes([]byte(js))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := t.TempDir()
+	errs := make(chan error, n)
+	for i := range n {
+		pkg := []string{"mac", "win"}[i%2]
+		go func() {
+			errs <- BundleRuntime(rs, []string{pkg}, cache, Layout{Root: t.TempDir(), Flat: true}, nil)
+		}()
+	}
+	for range n {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	for path, want := range map[string][]byte{"mac/libort.dylib": mac, "win/ort.dll": win} {
+		got, err := os.ReadFile(filepath.Join(cache, path))
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("%s = %q, %v; want %q", path, got, err, want)
+		}
+	}
+	if left, _ := os.ReadDir(filepath.Join(cache, ".downloads")); len(left) != 0 {
+		t.Errorf("downloads left behind: %v", left)
+	}
+	for _, pkg := range []string{"mac", "win"} {
+		entries, _ := os.ReadDir(filepath.Join(cache, pkg))
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".tmp") {
+				t.Errorf("temporary file left behind: %s/%s", pkg, e.Name())
+			}
+		}
 	}
 }

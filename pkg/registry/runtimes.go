@@ -533,9 +533,34 @@ func RuntimesDir() (string, error) {
 }
 
 func writeFileAtomic(dst string, data []byte) error {
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := createTemp(dst)
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// createTemp creates a file beside dst to rename onto it once written. Its
+// name is unique, so processes writing the same dst at once, such as
+// builds bundling runtimes in parallel, each write their own file.
+func createTemp(dst string) (*os.File, error) {
+	f, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*.tmp")
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return nil, err
+	}
+	return f, nil
 }
