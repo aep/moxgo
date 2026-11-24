@@ -21,14 +21,14 @@
       "description": "ONNX Runtime 1.29.0 for Linux x86_64: CPU (Microsoft)",
       "license": "MIT",
       "source": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz",
-        "sha256": "c3fddc4f139a045b0c4902c57410f0694f1c2fdf9b6939fbe38b1aeae7cd14ba",
-        "size": 11082880
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.29.0/microsoft.ml.onnxruntime.1.29.0.nupkg",
+        "sha256": "4557021fec4da3924e2e12ff44b1cc50b176de0d2c5c7daa89ab11c208b3a454",
+        "size": 155008437
       },
       "files": [
         {
           "name": "libonnxruntime.so",
-          "path": "onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so.1.29.0",
+          "path": "runtimes/linux-x64/native/libonnxruntime.so",
           "sha256": "5715f06d8992ca8eeeddcce43df3a7d38f97d537052126f558e912cb312460ca",
           "size": 28497752
         }
@@ -38,14 +38,14 @@
       "description": "ONNX Runtime 1.29.0 for Linux aarch64: CPU (Microsoft)",
       "license": "MIT",
       "source": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-aarch64-1.29.0.tgz",
-        "sha256": "e1799098ebc054b370f6176a450f158720f297818c613e5dc99b92e2ec82346f",
-        "size": 10027600
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.29.0/microsoft.ml.onnxruntime.1.29.0.nupkg",
+        "sha256": "4557021fec4da3924e2e12ff44b1cc50b176de0d2c5c7daa89ab11c208b3a454",
+        "size": 155008437
       },
       "files": [
         {
           "name": "libonnxruntime.so",
-          "path": "onnxruntime-linux-aarch64-1.29.0/lib/libonnxruntime.so.1.29.0",
+          "path": "runtimes/linux-arm64/native/libonnxruntime.so",
           "sha256": "a27d21126db312aa8f02f3d5eaebe466e991f51f469882e6d0407d5a8b64afda",
           "size": 24538024
         }
@@ -55,15 +55,15 @@
       "description": "ONNX Runtime 1.29.0 for macOS arm64: CPU, CoreML (Microsoft)",
       "license": "MIT",
       "source": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-osx-arm64-1.29.0.tgz",
-        "sha256": "d0706fc34f315d8c88639d0a8c81f2e09e815f282cabed3493c06a054352cf92",
-        "size": 41578864
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.29.0/microsoft.ml.onnxruntime.1.29.0.nupkg",
+        "sha256": "4557021fec4da3924e2e12ff44b1cc50b176de0d2c5c7daa89ab11c208b3a454",
+        "size": 155008437
       },
       "files": [
         {
           "name": "libonnxruntime.dylib",
-          "path": "onnxruntime-osx-arm64-1.29.0/lib/libonnxruntime.1.29.0.dylib",
-          "sha256": "68f6e54e695583adc371aef610ec4abb1ffaa3df656582922de7690f7e2000eb",
+          "path": "runtimes/osx-arm64/native/libonnxruntime.dylib",
+          "sha256": "c04fe65021445904a3cae047272cad05e648282c75bf1f9eb7b3440120ae13dc",
           "size": 43184400
         }
       ]
@@ -72,20 +72,20 @@
       "description": "ONNX Runtime 1.29.0 for Windows x64: CPU (Microsoft)",
       "license": "MIT",
       "source": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-win-x64-1.29.0.zip",
-        "sha256": "c9b4b7086b529ad814f428c1bad028e20a25d7dc0699836775faace4ab5b78b2",
-        "size": 79645520
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.29.0/microsoft.ml.onnxruntime.1.29.0.nupkg",
+        "sha256": "4557021fec4da3924e2e12ff44b1cc50b176de0d2c5c7daa89ab11c208b3a454",
+        "size": 155008437
       },
       "files": [
         {
           "name": "onnxruntime.dll",
-          "path": "onnxruntime-win-x64-1.29.0/lib/onnxruntime.dll",
+          "path": "runtimes/win-x64/native/onnxruntime.dll",
           "sha256": "69d8e6d3879a3b4001cdc74c8ed9ccc7e7f799a5b847059738323404519ec471",
           "size": 16149344
         },
         {
           "name": "onnxruntime_providers_shared.dll",
-          "path": "onnxruntime-win-x64-1.29.0/lib/onnxruntime_providers_shared.dll",
+          "path": "runtimes/win-x64/native/onnxruntime_providers_shared.dll",
           "sha256": "87f6878cdc1f80b3a9afa5b0c84663315030b4957f5bbb6b66470557cb2f48d8",
           "size": 21856
         }
